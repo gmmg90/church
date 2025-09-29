@@ -1,0 +1,71 @@
+{
+  "weekly": [
+    {
+      "name": "Angelus Mattutino",
+      "dayOfWeek": 0,
+      "hour": 7,
+      "minute": 0,
+      "melodyIndex": 0,
+      "isActive": true
+    },
+    {
+      "name": "Angelus Meridiano",
+      "dayOfWeek": 0,
+      "hour": 12,
+      "minute": 0,
+      "melodyIndex": 1,
+      "isActive": true
+    },
+    {
+      "name": "Angelus Serale",
+      "dayOfWeek": 0,
+      "hour": 18,
+      "minute": 0,
+      "melodyIndex": 0,
+      "isActive": true
+    },
+    {
+      "name": "Messa Domenicale",
+      "dayOfWeek": 0,
+      "hour": 10,
+      "minute": 45,
+      "melodyIndex": 2,
+      "isActive": true
+    }
+  ],
+  "special": [
+    {
+      "name": "Natale 2025",
+      "day": 25,
+      "month": 12,
+      "year": 2025,
+      "hour": 0,
+      "minute": 0,
+      "melodyIndex": 3,
+      "isActive": true,
+      "isRecurring": false
+    },
+    {
+      "name": "Capodanno",
+      "day": 1,
+      "month": 1,
+      "year": 2026,
+      "hour": 0,
+      "minute": 0,
+      "melodyIndex": 3,
+      "isActive": true,
+      "isRecurring": true
+    },
+    {
+      "name": "Test Immediato - Minuto Successivo",
+      "day": 23,
+      "month": 9,
+      "year": 2025,
+      "hour": 14,
+      "minute": 30,
+      "melodyIndex": 1,
+      "isActive": true,
+      "isRecurring": false
+    }
+  ]
+}
