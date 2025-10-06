@@ -1,0 +1,146 @@
+📘 
+Manuale di Installazione e Uso 
+ Controller Campane Chiesa
+🧩 Panoramica
+•	Hardware: ESP32 T‑Display TS0636G, RTC DS3231, 2 relè, pulsanti esterni per FUNERALE e CHIAMATA MESSA
+•	Interfaccia: Web UI su rete locale (SPIFFS), API HTTP REST
+•	Funzioni principali: due melodie predefinite, editor melodie, programmazione settimanale e semplificata, backup/restore, pulsanti fisici
+—
+🔌 Collegamenti hardware (cablaggio)
+È consigliato utilizzare cavi corti e adottare una massa (GND) comune tra tutti i moduli.
+•	Alimentazione ESP32: 5V tramite USB (consigliato in fase di configurazione)
+•	Display: integrato (ST7789 135×240)
+•	LED di stato: GPIO2
+1) RTC DS3231 (I2C)
+•	SDA → GPIO21
+•	SCL → GPIO22
+•	VCC → 3.3V
+•	GND → GND
+2) Relè (2 canali, livello attivo LOW)
+•	IN1 → GPIO25 (Campana 1 / piccola)
+•	IN2 → GPIO26 (Campana 2 / grande)
+•	VCC → 5V (modulo relè tipico); verificare la compatibilità del modulo
+•	GND → GND (comune con ESP32)
+Note:
+•	I moduli relè a 5V generalmente accettano segnali logici a 3.3V sui pin INx. Se ciò non fosse possibile, utilizzare un driver a transistor/optocoupler.
+•	Uscite attive LOW: livello LOW = relè ON.
+3) Pulsanti fisici
+•	Pulsante FUNERALE → tra GPIO27 e GND (INPUT_PULLUP interno)
+•	Pulsante CHIAMATA MESSA → tra GPIO32 e GND (INPUT_PULLUP interno)
+•	Pulsante CONFIG (boot) integrato nel T‑Display → GPIO0 (non utilizzare per funzioni esterne)
+Logica pulsanti con INPUT_PULLUP:
+•	Rilasciato: livello HIGH
+•	Premuto: livello LOW
+Riepilogo principali pin utilizzati
+•	RTC: SDA=21, SCL=22
+•	Relè: 25 (Relè 1), 26 (Relè 2)
+•	LED: 2
+•	Pulsanti: 27 (Funerale), 32 (Chiamata Messa), 0 (Config)
+—
+🛠️ Installazione firmware e UI
+Prerequisiti: PC con VS Code + PlatformIO, cavo USB‑C/Micro‑USB per il T‑Display.
+1) Compilazione e caricamento del firmware
+•	Task VS Code: PlatformIO Build → PlatformIO Upload
+•	In alternativa, terminale PowerShell:
+```powershell
+C:\Users\pep\.platformio\penv\Scripts\platformio.exe run --target upload
+```
+2) Caricamento della Web UI (SPIFFS)
+•	Task VS Code: Upload Filesystem Image
+•	In alternativa:
+```powershell
+C:\Users\pep\.platformio\penv\Scripts\platformio.exe run --target uploadfs
+```
+3) Monitor seriale (debug a 115200 baud)
+•	Task VS Code: PlatformIO Monitor
+-
+📶 Primo avvio e rete
+In assenza di una rete WiFi configurata, il dispositivo genera un Access Point di configurazione:
+•	SSID AP: ChurchBells‑Config
+•	Password AP: campanile123
+•	IP dell’AP: 192.168.4.1 (indicato anche sul display)
+Accedere dal browser all'indirizzo http://192.168.4.1 e impostare le credenziali WiFi nella sezione “Impostazioni”. Dopo il riavvio, l’IP locale viene mostrato sia sul display che nell’interfaccia utente.
+—
+🔐 Credenziali e sicurezza
+•	Accesso UI (Basic Auth):
+  - Username: admin
+  - Password: chiesa123
+•	Modifica delle credenziali:
+  - File `src/include/config.h`: ADMIN_USER (se definito via build flag) e ADMIN_PASSWORD
+  - File `src/config.cpp`: credenziali WiFi predefinite (`WIFI_SSID`, `WIFI_PASSWORD`)
+ —
+🖥️ Utilizzo dell’interfaccia web
+Accedere a http://<IP-dispositivo> autenticandosi con le credenziali indicate.
+Schede disponibili
+1) Stato
+•	Visualizzazione ora/data, stati WiFi/RTC/NTP, temperatura ESP32, modalità test, stop emergenza, uptime/firmware
+2) Melodie
+•	Elenco melodie, comandi riproduzione/stop
+•	Editor note: selezione campana (1/2), durata (ms), pausa (ms)
+3) Programmazione
+•	Eventi Speciali: gestione eventi datati, tipo e melodia associata
+•	Programmazione Semplificata: selezione Giorni × Orari × Melodia per generare schedulazioni
+•	Programmazione Settimanale: gestione dettagliata delle occorrenze
+4) Test Relè
+•	Visualizzazione stato e attivazione manuale temporizzata dei canali
+5) Impostazioni
+•	Configurazione WiFi, NTP/ora manuale, backup/ripristino configurazione
+Pulsanti fisici
+•	FUNERALE (GPIO27 ↔ GND): avvio melodia slot 0
+•	CHIAMATA MESSA (GPIO32 ↔ GND): avvio melodia slot 1
+•	Implementati anti‑rimbalzo, cooldown e blocco se già in riproduzione
+—
+🔗 API HTTP (REST)
+Area	Metodo	Endpoint	Descrizione	Body / Parametri
+Sistema e stato	GET	/api/status	Stato generale (WiFi, RTC, NTP, firmware, ecc.)	—
+	GET	/api/time	Ora/data correnti	—
+	POST	/api/set-time	Imposta l’orario manualmente	{ "datetime": "YYYY-MM-DD HH:MM:SS" }
+Melodie	GET	/api/melodies	Elenco melodie disponibili	—
+	GET	/api/melody?index={0..n}	Dettaglio melodia per indice	index (numero)
+	POST	/api/test-melody	Avvia una melodia di test	{ "melodyId": 0 }
+	POST	/api/stop-melody	Arresta la melodia in riproduzione	—
+Programmazione	GET	/api/weekly-schedules	Leggi programmazione settimanale	—
+	POST	/api/weekly-schedules	Salva/sostituisce programmazione settimanale	JSON con programmazione
+	GET	/api/special-events	Leggi eventi speciali datati	—
+	POST	/api/special-events	Salva/sostituisce eventi speciali	JSON con eventi
+Relè	GET	/api/relay-status	Stato dei relè	—
+	POST	/api/test-relay?relay={1|2}&duration={ms}	Attiva un relè per N ms	relay = 1 o 2, duration = millisecondi
+Configurazione e gestione	POST	/api/toggle-bells	Abilita/disabilita le campane	—
+	POST	/api/configure-wifi	Configura SSID/Password WiFi	{ "ssid": "...", "password": "..." }
+	GET	/api/backup	Scarica backup completo configurazione	—
+	POST	/api/restore	Ripristina configurazione da backup	JSON con configurazione
+Diagnostica	GET	/api/i2c-scan	Scansione I2C (DS3231 atteso a 0x68)	—
+🧪 Test rapidi
+•	Cortocircuitare GPIO27↔GND per eseguire “FUNERALE” (se disponibile)
+•	Cortocircuitare GPIO32↔GND per eseguire “CHIAMATA MESSA” (se disponibile)
+•	Nella sezione “Test Relè” è possibile testare l’attivazione temporizzata dei due canali
+—
+🧯 Risoluzione problemi
+•	UI non raggiungibile: verificare IP (display), controllare /api/status, utilizzare eventualmente l’AP di configurazione
+•	RTC non rilevato: controllare connessioni SDA/SCL, usare /api/i2c-scan → 0x68
+•	Pulsanti non funzionanti: verificare collegamenti su GND; Serial Monitor visualizza `[FUNERAL] GPIO27 = X` e `[MASS] GPIO32 = X`
+•	Relè invertiti: le uscite sono active‑LOW (LOW = ON)
+•	NTP assente: regolare manualmente l’ora nelle impostazioni
+•	Protezione termica: se la temperatura è elevata, alcune operazioni vengono limitate
+—
+📝 Note e buone pratiche
+•	Non utilizzare GPIO0 per pulsanti esterni (pin di boot); destinato solo a CONFIG
+•	Mantenere l’ordine dei collegamenti e identificare i cavi tramite etichettatura
+•	Effettuare sempre un backup prima di restore o aggiornamenti
+—
+📎 Riferimenti veloci
+•	Pin: RTC 21/22 • Relè 25/26 • LED 2 • Pulsanti 27/32/0
+•	UI: admin / chiesa123
+•	AP: ChurchBells‑Config / campanile123
+•	Baud seriale: 115200
+—
+
+Manuale d’Uso – Controller Campane Chiesa
+Versione: 1.0
+Data di stampa: Ottobre 2025
+Revisione: R1
+Tutti i diritti riservati © Chiesa Regina Pacis - Gela
+È vietata la riproduzione, anche parziale, senza autorizzazione.
+Questo documento è stato redatto con la massima cura.
+
+
