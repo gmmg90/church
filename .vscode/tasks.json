@@ -1,0 +1,64 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "PlatformIO Build",
+			"type": "shell",
+			"command": "pio run",
+			"problemMatcher": [
+				"$platformio"
+			],
+			"group": "build"
+		},
+		{
+			"label": "PlatformIO Upload",
+			"type": "shell",
+			"command": "pio run --target upload",
+			"problemMatcher": [
+				"$platformio"
+			],
+			"group": "build"
+		},
+		{
+			"label": "PlatformIO Clean",
+			"type": "shell",
+			"command": "pio run --target clean",
+			"problemMatcher": [
+				"$platformio"
+			],
+			"group": "build"
+		},
+		{
+			"label": "PlatformIO Monitor",
+			"type": "shell",
+			"command": "pio device monitor",
+			"problemMatcher": [],
+			"group": "build",
+			"isBackground": true
+		},
+		{
+			"label": "Build firmware (esp32dev)",
+			"type": "shell",
+			"command": "pio",
+			"args": [
+				"run",
+				"-e",
+				"esp32dev"
+			],
+			"problemMatcher": [
+				"$gcc"
+			],
+			"group": "build"
+		}
+		,
+		{
+			"label": "PlatformIO Upload FS",
+			"type": "shell",
+			"command": "pio run --target uploadfs",
+			"problemMatcher": [
+				"$platformio"
+			],
+			"group": "build"
+		}
+	]
+}

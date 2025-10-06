@@ -1,0 +1,1908 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Controllo Campane Chiesa</title>
+  <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Cpath fill='%23FFD700' d='M50 10c-8 0-15 7-15 15v25c0 8 7 15 15 15s15-7 15-15V25c0-8-7-15-15-15z'/%3E%3Cpath fill='%23B8860B' d='M35 50v5c0 8 7 15 15 15s15-7 15-15v-5H35z'/%3E%3Cpath fill='%238B4513' d='M48 70h4v15h-4z'/%3E%3Ccircle fill='%23CD853F' cx='50' cy='88' r='4'/%3E%3Cpath fill='%23FFA500' d='M42 20h16v2H42zm0 5h16v2H42zm0 5h16v2H42z'/%3E%3C/svg%3E">
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
+  <style>
+    :root {
+      --primary: #1e40af;
+      --secondary: #3b82f6;
+      --success: #10b981;
+      --warning: #f59e0b;
+      --danger: #ef4444;
+      --dark: #1f2937;
+      --light: #f8fafc;
+      --border: #e5e7eb;
+      --text: #374151;
+      --text-light: #6b7280;
+    }
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: var(--text);
+      min-height: 100vh;
+      line-height: 1.6;
+    }
+
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+      padding: 20px;
+    }
+
+    .header {
+      background: rgba(255, 255, 255, 0.95);
+      backdrop-filter: blur(10px);
+      border-radius: 15px;
+      padding: 20px;
+      margin-bottom: 20px;
+      text-align: center;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+    }
+
+    .header h1 {
+      color: var(--primary);
+      margin-bottom: 10px;
+      font-size: 2.5rem;
+      font-weight: 700;
+    }
+
+    .status-bar {
+      display: flex;
+      justify-content: center;
+      gap: 15px;
+      flex-wrap: wrap;
+      margin-top: 15px;
+    }
+
+    .status-chip {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 16px;
+      border-radius: 25px;
+      background: white;
+      border: 2px solid var(--border);
+      font-weight: 600;
+      font-size: 0.9rem;
+    }
+
+    .status-dot {
+      width: 12px;
+      height: 12px;
+      border-radius: 50%;
+      background: #d1d5db;
+    }
+
+    .status-dot.connected { background: var(--success); }
+    .status-dot.warning { background: var(--warning); }
+    .status-dot.error { background: var(--danger); }
+
+    .tabs {
+      display: flex;
+      background: rgba(255, 255, 255, 0.9);
+      border-radius: 12px;
+      padding: 6px;
+      margin-bottom: 20px;
+      box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+      overflow-x: auto;
+    }
+
+    .tab {
+      flex: 1;
+      min-width: 120px;
+      padding: 12px 20px;
+      text-align: center;
+      background: transparent;
+      border: none;
+      border-radius: 8px;
+      cursor: pointer;
+      font-weight: 600;
+      color: var(--text-light);
+      transition: all 0.3s ease;
+      white-space: nowrap;
+    }
+
+    .tab.active {
+      background: var(--primary);
+      color: white;
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(30, 64, 175, 0.3);
+    }
+
+    .tab:hover:not(.active) {
+      background: rgba(30, 64, 175, 0.1);
+      color: var(--primary);
+    }
+
+    .tab-content {
+      display: none;
+    }
+
+    .tab-content.active {
+      display: block;
+    }
+
+    .card {
+      background: rgba(255, 255, 255, 0.95);
+      border-radius: 15px;
+      padding: 25px;
+      margin-bottom: 20px;
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+      backdrop-filter: blur(10px);
+    }
+
+    .card h2 {
+      color: var(--primary);
+      margin-bottom: 20px;
+      font-size: 1.5rem;
+      font-weight: 700;
+      border-bottom: 2px solid var(--border);
+      padding-bottom: 10px;
+    }
+
+    .grid {
+      display: grid;
+      gap: 20px;
+      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    }
+
+    .form-group {
+      margin-bottom: 20px;
+    }
+
+    .form-label {
+      display: block;
+      margin-bottom: 8px;
+      font-weight: 600;
+      color: var(--text);
+    }
+
+    .form-control {
+      width: 100%;
+      padding: 12px 16px;
+      border: 2px solid var(--border);
+      border-radius: 8px;
+      font-size: 16px;
+      transition: border-color 0.3s ease;
+      background: white;
+    }
+
+    .form-control:focus {
+      outline: none;
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px rgba(30, 64, 175, 0.1);
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 12px 24px;
+      border: none;
+      border-radius: 8px;
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.3s ease;
+      text-decoration: none;
+      justify-content: center;
+      min-width: 120px;
+    }
+
+    .btn:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+    }
+
+    .btn-primary {
+      background: var(--primary);
+      color: white;
+    }
+
+    .btn-success {
+      background: var(--success);
+      color: white;
+    }
+
+    .btn-warning {
+      background: var(--warning);
+      color: white;
+    }
+
+    .btn-danger {
+      background: var(--danger);
+      color: white;
+    }
+
+    .btn-secondary {
+      background: var(--text-light);
+      color: white;
+    }
+
+    .btn-outline {
+      background: transparent;
+      color: var(--primary);
+      border: 2px solid var(--primary);
+    }
+
+    .btn-group {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      margin-top: 15px;
+    }
+
+    .bells-status-enabled {
+      color: var(--success) !important;
+      font-weight: 700;
+    }
+
+    .bells-status-disabled {
+      color: var(--danger) !important;
+      font-weight: 700;
+    }
+
+    .bells-control-card {
+      border-left: 4px solid var(--success);
+      background: linear-gradient(135deg, rgba(16, 185, 129, 0.05) 0%, rgba(16, 185, 129, 0.02) 100%);
+    }
+
+    .bells-control-card.disabled {
+      border-left-color: var(--danger);
+      background: linear-gradient(135deg, rgba(239, 68, 68, 0.05) 0%, rgba(239, 68, 68, 0.02) 100%);
+    }
+
+    .info-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 15px;
+      margin-top: 15px;
+    }
+
+    .info-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 15px;
+      background: rgba(30, 64, 175, 0.05);
+      border-radius: 8px;
+      border-left: 4px solid var(--primary);
+    }
+
+    .info-label {
+      font-weight: 600;
+      color: var(--text);
+    }
+
+    .info-value {
+      font-family: 'Courier New', monospace;
+      font-weight: 700;
+      color: var(--primary);
+    }
+
+    .note-row {
+      display: grid;
+      grid-template-columns: 120px 120px 120px auto;
+      gap: 15px;
+      align-items: center;
+      padding: 15px;
+      background: rgba(248, 250, 252, 0.8);
+      border-radius: 8px;
+      margin-bottom: 10px;
+      border: 2px solid transparent;
+      transition: all 0.3s ease;
+    }
+
+    .note-row:hover {
+      border-color: var(--primary);
+      background: rgba(30, 64, 175, 0.05);
+    }
+
+    .schedule-item {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 15px;
+      align-items: center;
+      padding: 20px;
+      background: rgba(248, 250, 252, 0.8);
+      border-radius: 12px;
+      margin-bottom: 15px;
+      border-left: 4px solid var(--primary);
+      transition: all 0.3s ease;
+    }
+
+    .schedule-item:hover {
+      transform: translateX(5px);
+      box-shadow: 0 4px 15px rgba(0, 0, 0, 0.1);
+    }
+
+    .schedule-content {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 10px;
+      align-items: center;
+    }
+
+    .switch {
+      position: relative;
+      display: inline-block;
+      width: 60px;
+      height: 34px;
+    }
+
+    .switch input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+    }
+
+    .slider {
+      position: absolute;
+      cursor: pointer;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background-color: #ccc;
+      transition: .4s;
+      border-radius: 34px;
+    }
+
+    .slider:before {
+      position: absolute;
+      content: "";
+      height: 26px;
+      width: 26px;
+      left: 4px;
+      bottom: 4px;
+      background-color: white;
+      transition: .4s;
+      border-radius: 50%;
+    }
+
+    input:checked + .slider {
+      background-color: var(--primary);
+    }
+
+    input:checked + .slider:before {
+      transform: translateX(26px);
+    }
+
+    .emergency-stop {
+      position: fixed;
+      bottom: 30px;
+      right: 30px;
+      width: 80px;
+      height: 80px;
+      border-radius: 50%;
+      background: var(--danger);
+      color: white;
+      border: none;
+      font-size: 18px;
+      font-weight: bold;
+      cursor: pointer;
+      box-shadow: 0 4px 20px rgba(239, 68, 68, 0.4);
+      z-index: 1000;
+      animation: pulse 2s infinite;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+    }
+
+    @keyframes pulse {
+      0% { box-shadow: 0 4px 20px rgba(239, 68, 68, 0.4); }
+      50% { box-shadow: 0 4px 30px rgba(239, 68, 68, 0.8); }
+      100% { box-shadow: 0 4px 20px rgba(239, 68, 68, 0.4); }
+    }
+
+    .loading {
+      display: inline-block;
+      width: 20px;
+      height: 20px;
+      border: 3px solid #f3f3f3;
+      border-top: 3px solid var(--primary);
+      border-radius: 50%;
+      animation: spin 1s linear infinite;
+    }
+
+    @keyframes spin {
+      0% { transform: rotate(0deg); }
+      100% { transform: rotate(360deg); }
+    }
+
+    .notification {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      padding: 15px 25px;
+      border-radius: 8px;
+      color: white;
+      font-weight: 600;
+      z-index: 1001;
+      transform: translateX(400px);
+      transition: transform 0.3s ease;
+      box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+    }
+
+    .notification.show {
+      transform: translateX(0);
+    }
+
+    .notification.success { background: var(--success); }
+    .notification.error { background: var(--danger); }
+    .notification.warning { background: var(--warning); }
+    .notification.info { background: var(--secondary); }
+
+    @media (max-width: 768px) {
+      .container {
+        padding: 10px;
+      }
+
+      .header h1 {
+        font-size: 2rem;
+      }
+
+      .tabs {
+        flex-direction: column;
+        gap: 5px;
+      }
+
+      .tab {
+        padding: 15px;
+        min-width: auto;
+      }
+
+      .note-row,
+      .schedule-content {
+        grid-template-columns: 1fr;
+        text-align: center;
+      }
+
+      .btn-group {
+        flex-direction: column;
+      }
+
+      .emergency-stop {
+        width: 60px;
+        height: 60px;
+        bottom: 20px;
+        right: 20px;
+        font-size: 14px;
+      }
+
+      .grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .hidden {
+      display: none !important;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <!-- Header con stato -->
+    <div class="header">
+      <h1>🔔 Controllo Campane Chiesa</h1>
+      <div class="status-bar">
+        <div class="status-chip">
+          <div class="status-dot" id="wifiDot"></div>
+          <span id="wifiText">WiFi</span>
+        </div>
+        <div class="status-chip">
+          <div class="status-dot" id="rtcDot"></div>
+          <span id="rtcText">RTC</span>
+        </div>
+        <div class="status-chip">
+          <div class="status-dot" id="ntpDot"></div>
+          <span id="ntpText">NTP</span>
+        </div>
+        <div class="status-chip">
+          <div class="status-dot" id="bellsDot"></div>
+          <span id="bellsText">Campane</span>
+        </div>
+        <div class="status-chip" id="autoStartChip" style="background: linear-gradient(135deg, #10b981, #059669); color: white; border-color: #10b981;">
+          <div style="width: 12px; height: 12px; border-radius: 50%; background: white;"></div>
+          <span style="font-weight: 700;">AUTO-START ✓</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tab Navigation -->
+    <div class="tabs">
+      <button class="tab active" data-tab="stato">📊 Stato</button>
+      <button class="tab" data-tab="melodie">🎵 Melodie</button>
+      <button class="tab" data-tab="programmazione">⏰ Programmazione</button>
+      <button class="tab" data-tab="rele">🔧 Test Relè</button>
+      <button class="tab" data-tab="impostazioni">⚙️ Impostazioni</button>
+    </div>
+
+    <!-- Tab: Stato -->
+    <div id="tab-stato" class="tab-content active">
+      <div style="margin-bottom: 20px; padding: 15px; background: linear-gradient(135deg, rgba(16, 185, 129, 0.1) 0%, rgba(16, 185, 129, 0.05) 100%); border-radius: 12px; border-left: 4px solid var(--success);">
+        <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 8px;">
+          <span style="font-size: 1.5rem;">🔔</span>
+          <span style="font-weight: 700; color: var(--success); font-size: 1.1rem;">Abilitazione Automatica Attiva</span>
+        </div>
+        <div style="color: var(--text); font-size: 0.95rem;">
+          Le campane si <strong>abilitano automaticamente</strong> ad ogni riavvio del sistema. 
+          Puoi disabilitarle temporaneamente se necessario, ma si riattiveranno al prossimo avvio.
+        </div>
+      </div>
+      
+      <div class="grid">
+        <div class="card">
+          <h2>Orologio</h2>
+          <div class="info-grid">
+            <div class="info-item">
+              <span class="info-label">Ora corrente</span>
+              <span class="info-value" id="currentTime">--:--:--</span>
+            </div>
+            <div class="info-item">
+              <span class="info-label">Data</span>
+              <span class="info-value" id="currentDate">--/--/----</span>
+            </div>
+            <div class="info-item">
+              <span class="info-label">Fuso orario</span>
+              <span class="info-value" id="timezone">Europa/Roma</span>
+            </div>
+            <div class="info-item">
+              <span class="info-label">IP Address</span>
+              <span class="info-value" id="ipAddress">---.---.---.---</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>Controllo Campane</h2>
+          <div class="info-grid">
+            <div class="info-item">
+              <span class="info-label">Stato Campane</span>
+              <span class="info-value" id="bellsStatus">--</span>
+            </div>
+            <div class="info-item">
+              <span class="info-label">Ultima Suonata</span>
+              <span class="info-value" id="lastRing">Mai</span>
+            </div>
+            <div class="info-item">
+              <span class="info-label">Suonate Totali</span>
+              <span class="info-value" id="totalRings">0</span>
+            </div>
+            <div class="info-item">
+              <span class="info-label">Avvio Automatico</span>
+              <span class="info-value">✅ ATTIVO</span>
+            </div>
+          </div>
+          
+          <div class="form-group" style="margin-top: 20px;">
+            <div style="display: flex; align-items: center; gap: 15px; padding: 15px; background: rgba(248, 250, 252, 0.8); border-radius: 8px; border-left: 4px solid var(--primary);">
+              <label class="switch">
+                <input type="checkbox" id="bellsMainToggle">
+                <span class="slider"></span>
+              </label>
+              <div style="flex: 1;">
+                <div style="font-weight: 700; font-size: 1.1rem; color: var(--text);">Abilita Campane</div>
+                <div style="font-size: 0.9rem; color: var(--text-light); margin-top: 4px;" id="bellsToggleDescription">
+                  Le campane sono attualmente abilitate e suoneranno automaticamente
+                </div>
+              </div>
+            </div>
+          </div>
+          
+          <div class="btn-group">
+            <button class="btn btn-success" id="forceEnableBtn">🔔 Forza Abilitazione</button>
+            <button class="btn btn-warning" id="forceDisableBtn">🔇 Disabilita Temporaneamente</button>
+            <button class="btn btn-danger" id="emergencyStopBtn">🚨 Stop Emergenza</button>
+          </div>
+          
+          <div style="margin-top: 15px; padding: 12px; background: rgba(16, 185, 129, 0.1); border-radius: 8px; border-left: 4px solid var(--success);">
+            <div style="font-weight: 600; color: var(--success); margin-bottom: 5px;">💡 Informazioni Importante</div>
+            <div style="font-size: 0.9rem; color: var(--text);">
+              • Le campane si <strong>abilitano automaticamente</strong> ad ogni riavvio<br>
+              • La disabilitazione è <strong>temporanea</strong> fino al prossimo riavvio<br>
+              • Usa "Stop Emergenza" per fermare immediatamente qualsiasi suono
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>Controllo Sistema</h2>
+          <div class="form-group">
+            <label class="switch">
+              <input type="checkbox" id="testModeToggle">
+              <span class="slider"></span>
+            </label>
+            <span style="margin-left: 15px; font-weight: 600;">Modalità Test</span>
+          </div>
+          <div class="btn-group">
+            <button class="btn btn-warning" id="stopBtn">🛑 Stop Melodia</button>
+            <button class="btn btn-secondary" id="testBell1Btn">🔔 Test Campana 1</button>
+            <button class="btn btn-secondary" id="testBell2Btn">🔔 Test Campana 2</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>🌡️ Monitoraggio Temperatura</h2>
+        <div class="info-grid">
+          <div class="info-item">
+            <span class="info-label">Temperatura ESP32</span>
+            <span class="info-value" id="esp32Temperature">--°C</span>
+          </div>
+          <div class="info-item">
+            <span class="info-label">Stato Termico</span>
+            <span class="info-value" id="thermalStatus">--</span>
+          </div>
+          <div class="info-item">
+            <span class="info-label">Soglia Avviso</span>
+            <span class="info-value">70°C</span>
+          </div>
+          <div class="info-item">
+            <span class="info-label">Soglia Critica</span>
+            <span class="info-value">80°C</span>
+          </div>
+        </div>
+        
+        <div id="thermalAlert" style="display: none; margin-top: 15px; padding: 12px; border-radius: 8px; border-left: 4px solid;">
+          <div style="font-weight: 600; margin-bottom: 5px;">⚠️ Allerta Temperatura</div>
+          <div style="font-size: 0.9rem;" id="thermalAlertText">
+            Temperatura elevata rilevata
+          </div>
+        </div>
+        
+        <div style="margin-top: 15px; padding: 12px; background: rgba(16, 185, 129, 0.1); border-radius: 8px; border-left: 4px solid var(--success);">
+          <div style="font-weight: 600; color: var(--success); margin-bottom: 5px;">💡 Info Sistema</div>
+          <div style="font-size: 0.9rem; color: var(--text);">
+            • CPU ridotta a <strong>160MHz</strong> per minor consumo<br>
+            • WiFi a potenza ridotta per minor riscaldamento<br>
+            • Protezione automatica oltre 80°C
+          </div>
+        </div>
+      </div>
+    </div>
+    </div>
+
+    <!-- Tab: Melodie -->
+    <div id="tab-melodie" class="tab-content">
+      <div class="grid">
+        <div class="card">
+          <h2>Riproduci Melodie</h2>
+          <div class="form-group">
+            <label class="form-label">Seleziona Melodia</label>
+            <select class="form-control" id="melodySelect">
+              <option value="">Caricamento...</option>
+            </select>
+          </div>
+          <div class="btn-group">
+            <button class="btn btn-primary" id="playBtn">▶️ Riproduci</button>
+            <button class="btn btn-secondary" id="stopMelodyBtn">⏹️ Stop</button>
+          </div>
+          <div class="btn-group">
+            <button class="btn btn-outline" onclick="playQuick(0)">Angelus</button>
+            <button class="btn btn-outline" onclick="playQuick(1)">Messa</button>
+            <button class="btn btn-outline" onclick="playQuick(2)">Festa</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>Editor Melodie</h2>
+          <div class="form-group">
+            <label class="form-label">Nome Melodia</label>
+            <input type="text" class="form-control" id="melodyName" placeholder="Nome della melodia">
+          </div>
+          <div class="btn-group">
+            <button class="btn btn-success" id="addNoteBtn">➕ Aggiungi Nota</button>
+            <button class="btn btn-warning" id="testMelodyBtn">🎵 Prova</button>
+          </div>
+          <div id="notesContainer"></div>
+          <div class="btn-group">
+            <button class="btn btn-primary" id="saveMelodyBtn">💾 Salva</button>
+            <button class="btn btn-secondary" id="saveAsNewBtn">📝 Salva come Nuova</button>
+            <button class="btn btn-danger" id="deleteMelodyBtn">🗑️ Elimina</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tab: Programmazione -->
+    <div id="tab-programmazione" class="tab-content">
+      <div class="card">
+        <h2>Eventi Speciali</h2>
+        <div class="btn-group">
+          <button class="btn btn-success" id="addSpecialBtn">➕ Aggiungi Evento</button>
+          <button class="btn btn-primary" id="saveSpecialBtn">💾 Salva Modifiche</button>
+        </div>
+        <div id="specialContainer"></div>
+      </div>
+
+      <div class="card">
+        <h2>Programmazione Semplificata (Giorni + Orari)</h2>
+        <div class="grid">
+          <div>
+            <div class="form-group">
+              <label class="form-label">Nome Programmazione</label>
+              <input type="text" class="form-control" id="simpleName" placeholder="Es. Chiamata Messa">
+            </div>
+            <div class="form-group">
+              <label class="form-label">Seleziona Giorni</label>
+              <div style="display:grid;grid-template-columns:repeat(4, minmax(120px,1fr));gap:10px;">
+                <label><input type="checkbox" class="simple-day" value="1"> Lunedì</label>
+                <label><input type="checkbox" class="simple-day" value="2"> Martedì</label>
+                <label><input type="checkbox" class="simple-day" value="3"> Mercoledì</label>
+                <label><input type="checkbox" class="simple-day" value="4"> Giovedì</label>
+                <label><input type="checkbox" class="simple-day" value="5"> Venerdì</label>
+                <label><input type="checkbox" class="simple-day" value="6"> Sabato</label>
+                <label><input type="checkbox" class="simple-day" value="0"> Domenica</label>
+              </div>
+            </div>
+          </div>
+          <div>
+            <div class="form-group">
+              <label class="form-label">Orari</label>
+              <div style="display:flex;gap:10px;align-items:center;">
+                <input type="time" class="form-control" id="simpleTimeInput" value="19:30" style="max-width:160px;">
+                <button class="btn btn-secondary" id="addSimpleTimeBtn">➕ Aggiungi Orario</button>
+              </div>
+              <div id="simpleTimesList" style="margin-top:10px;"></div>
+            </div>
+            <div class="form-group">
+              <label class="form-label">Melodia</label>
+              <select class="form-control" id="simpleMelodySelect"></select>
+            </div>
+            <div class="btn-group">
+              <button class="btn btn-success" id="generateSchedulesBtn">🧩 Genera Programmazioni</button>
+              <button class="btn btn-warning" id="clearSimpleTimesBtn">🧹 Pulisci Orari</button>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="card">
+        <h2>Programmazione Settimanale</h2>
+        <div class="btn-group">
+          <button class="btn btn-success" id="addWeeklyBtn">➕ Aggiungi Programmazione</button>
+          <button class="btn btn-primary" id="saveWeeklyBtn">💾 Salva Modifiche</button>
+        </div>
+        <div id="weeklyContainer"></div>
+      </div>
+    </div>
+
+    <!-- Tab: Test Relè -->
+    <div id="tab-rele" class="tab-content">
+      <div class="grid">
+        <div class="card">
+          <h2>Stato Relè</h2>
+          <div class="info-grid">
+            <div class="info-item">
+              <span class="info-label">Relè 1</span>
+              <span class="info-value" id="relay1Status">OFF</span>
+            </div>
+            <div class="info-item">
+              <span class="info-label">Relè 2</span>
+              <span class="info-value" id="relay2Status">OFF</span>
+            </div>
+          </div>
+          <div class="btn-group">
+            <button class="btn btn-secondary" onclick="testRelay(1, 500)">Test Relè 1</button>
+            <button class="btn btn-secondary" onclick="testRelay(2, 500)">Test Relè 2</button>
+            <button class="btn btn-warning" id="refreshRelayBtn">🔄 Aggiorna Stato</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>Test Manuale</h2>
+          <div class="form-group">
+            <label class="form-label">Relè</label>
+            <select class="form-control" id="relaySelect">
+              <option value="1">Relè 1 (Campana Piccola)</option>
+              <option value="2">Relè 2 (Campana Grande)</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Durata (ms)</label>
+            <input type="number" class="form-control" id="durationInput" value="500" min="100" max="5000" step="50">
+          </div>
+          <button class="btn btn-primary" id="manualTestBtn">🔧 Esegui Test</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Tab: Impostazioni -->
+    <div id="tab-impostazioni" class="tab-content">
+      <div class="grid">
+        <div class="card">
+          <h2>Configurazione WiFi</h2>
+          <div class="form-group">
+            <label class="form-label">SSID</label>
+            <input type="text" class="form-control" id="wifiSSID" placeholder="Nome rete WiFi">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Password</label>
+            <input type="password" class="form-control" id="wifiPassword" placeholder="Password WiFi">
+          </div>
+          <button class="btn btn-primary" id="saveWifiBtn">💾 Salva e Riavvia</button>
+        </div>
+
+        <div class="card">
+          <h2>Impostazioni Orario</h2>
+          <div class="form-group">
+            <label class="form-label">Data e Ora</label>
+            <input type="datetime-local" class="form-control" id="dateTimeInput">
+          </div>
+          <div class="btn-group">
+            <button class="btn btn-primary" id="setTimeBtn">🕐 Imposta Orario</button>
+            <button class="btn btn-secondary" id="syncNtpBtn">🌐 Sincronizza NTP</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <h2>Backup e Ripristino</h2>
+          <div class="btn-group">
+            <button class="btn btn-success" id="backupBtn">💾 Scarica Backup</button>
+          </div>
+          <div class="form-group">
+            <label class="form-label">Ripristina da File</label>
+            <input type="file" class="form-control" id="restoreFile" accept=".json">
+          </div>
+          <button class="btn btn-warning" id="restoreBtn">📂 Ripristina</button>
+        </div>
+
+        <div class="card">
+          <h2>Sistema</h2>
+          <div class="info-grid">
+            <div class="info-item">
+              <span class="info-label">Firmware</span>
+              <span class="info-value" id="firmwareVersion">v0.0.0</span>
+            </div>
+            <div class="info-item">
+              <span class="info-label">Uptime</span>
+              <span class="info-value" id="uptime">-- giorni</span>
+            </div>
+          </div>
+          <div class="btn-group">
+            <button class="btn btn-secondary" id="reloadBtn">🔄 Ricarica Dati</button>
+            <button class="btn btn-outline" onclick="window.open('/api/status', '_blank')">📊 API Status</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Emergency Stop Button -->
+  <button class="emergency-stop" onclick="emergencyStop()">
+    STOP<br>🚨
+  </button>
+
+  <!-- Notification Container -->
+  <div id="notification" class="notification"></div>
+
+  <script>
+    // === UTILITY FUNCTIONS ===
+    const API_BASE = '';
+    let melodies = [];
+    let weeklySchedules = [];
+    let specialEvents = [];
+  let simpleTimes = [];
+
+    async function apiCall(endpoint, options = {}) {
+      try {
+        const response = await fetch(API_BASE + endpoint, {
+          ...options,
+          headers: {
+            'Content-Type': 'application/json',
+            ...options.headers
+          }
+        });
+        
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        
+        const contentType = response.headers.get('content-type');
+        if (contentType && contentType.includes('application/json')) {
+          return await response.json();
+        }
+        return await response.text();
+      } catch (error) {
+        console.error('API call failed:', error);
+        showNotification('Errore di connessione: ' + error.message, 'error');
+        throw error;
+      }
+    }
+
+    function showNotification(message, type = 'info') {
+      const notification = document.getElementById('notification');
+      notification.textContent = message;
+      notification.className = `notification ${type} show`;
+      
+      setTimeout(() => {
+        notification.classList.remove('show');
+      }, 5000);
+    }
+
+    function updateStatusDot(dotId, status) {
+      const dot = document.getElementById(dotId);
+      if (dot) {
+        dot.className = 'status-dot';
+        if (status) {
+          dot.classList.add('connected');
+        } else {
+          dot.classList.add('error');
+        }
+      }
+    }
+
+    // === TAB MANAGEMENT ===
+    document.querySelectorAll('.tab').forEach(tab => {
+      tab.addEventListener('click', () => {
+        // Remove active class from all tabs and contents
+        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+        document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+        
+        // Add active class to clicked tab and corresponding content
+        tab.classList.add('active');
+        const tabId = tab.getAttribute('data-tab');
+        const content = document.getElementById(`tab-${tabId}`);
+        if (content) {
+          content.classList.add('active');
+        }
+      });
+    });
+
+    // === STATUS MANAGEMENT ===
+    async function loadStatus() {
+      try {
+        const status = await apiCall('/api/status');
+        
+        // Update status dots
+        updateStatusDot('wifiDot', status.wifiConnected);
+        updateStatusDot('rtcDot', status.rtcConnected);
+        updateStatusDot('ntpDot', status.ntpSynced);
+        updateStatusDot('bellsDot', status.bellsEnabled);
+        
+        // Update status text
+        document.getElementById('wifiText').textContent = status.wifiConnected ? 'WiFi OK' : 'WiFi OFF';
+        document.getElementById('rtcText').textContent = status.rtcConnected ? 'RTC OK' : 'RTC OFF';
+        document.getElementById('ntpText').textContent = status.ntpSynced ? 'NTP OK' : 'NTP OFF';
+        document.getElementById('bellsText').textContent = status.bellsEnabled ? 'Attive' : 'Disattive';
+        
+        // Update bells status in new section
+        const bellsStatus = document.getElementById('bellsStatus');
+        if (bellsStatus) {
+          bellsStatus.textContent = status.bellsEnabled ? '🔔 ABILITATE' : '🔇 DISABILITATE';
+          bellsStatus.className = status.bellsEnabled ? 'info-value bells-status-enabled' : 'info-value bells-status-disabled';
+        }
+        
+        // Update bells control card style
+        const bellsControlCard = document.querySelector('.card h2');
+        if (bellsControlCard && bellsControlCard.textContent.includes('Controllo Campane')) {
+          const card = bellsControlCard.closest('.card');
+          card.classList.toggle('bells-control-card', status.bellsEnabled);
+          card.classList.toggle('disabled', !status.bellsEnabled);
+        }
+        
+        // Update temperature information
+        if (status.esp32Temperature !== undefined) {
+          const tempElement = document.getElementById('esp32Temperature');
+          const statusElement = document.getElementById('thermalStatus');
+          const alertElement = document.getElementById('thermalAlert');
+          const alertTextElement = document.getElementById('thermalAlertText');
+          
+          if (tempElement) {
+            tempElement.textContent = status.esp32Temperature.toFixed(1) + '°C';
+            
+            // Color based on temperature
+            if (status.thermalProtection) {
+              tempElement.style.color = 'var(--danger)';
+              tempElement.style.fontWeight = 'bold';
+            } else if (status.temperatureWarning) {
+              tempElement.style.color = 'var(--warning)';
+              tempElement.style.fontWeight = 'bold';
+            } else {
+              tempElement.style.color = 'var(--success)';
+              tempElement.style.fontWeight = 'normal';
+            }
+          }
+          
+          if (statusElement) {
+            if (status.thermalProtection) {
+              statusElement.textContent = '🚨 CRITICA';
+              statusElement.style.color = 'var(--danger)';
+            } else if (status.temperatureWarning) {
+              statusElement.textContent = '⚠️ ELEVATA';
+              statusElement.style.color = 'var(--warning)';
+            } else {
+              statusElement.textContent = '✅ NORMALE';
+              statusElement.style.color = 'var(--success)';
+            }
+          }
+          
+          // Show/hide thermal alert
+          if (alertElement && alertTextElement) {
+            if (status.thermalProtection) {
+              alertElement.style.display = 'block';
+              alertElement.style.background = 'rgba(239, 68, 68, 0.1)';
+              alertElement.style.borderColor = 'var(--danger)';
+              alertTextElement.innerHTML = '<strong>PROTEZIONE TERMICA ATTIVA!</strong><br>Sistema in modalità sicurezza per prevenire danni';
+            } else if (status.temperatureWarning) {
+              alertElement.style.display = 'block';
+              alertElement.style.background = 'rgba(245, 158, 11, 0.1)';
+              alertElement.style.borderColor = 'var(--warning)';
+              alertTextElement.innerHTML = '<strong>Temperatura elevata rilevata</strong><br>Monitoraggio attivo, sistema sotto controllo';
+            } else {
+              alertElement.style.display = 'none';
+            }
+          }
+        }
+        
+        // Update toggle description
+        const description = document.getElementById('bellsToggleDescription');
+        if (description) {
+          if (status.bellsEnabled) {
+            description.textContent = 'Le campane sono attualmente abilitate e suoneranno automaticamente secondo le programmazioni';
+            description.style.color = 'var(--success)';
+          } else {
+            description.textContent = 'Le campane sono DISABILITATE - nessun suono automatico fino alla riabilitazione';
+            description.style.color = 'var(--danger)';
+          }
+        }
+        
+        // Update statistics
+        document.getElementById('totalRings').textContent = status.totalBellRings || 0;
+        if (status.lastBellTime && status.lastBellTime > 0) {
+          const lastTime = new Date(status.lastBellTime);
+          document.getElementById('lastRing').textContent = lastTime.toLocaleTimeString();
+        }
+        
+        // Update IP address
+        document.getElementById('ipAddress').textContent = status.ipAddress || 'N/A';
+        
+        // Update timezone
+        document.getElementById('timezone').textContent = status.timezoneDescription || 'Europa/Roma';
+        
+        // Update firmware version
+        document.getElementById('firmwareVersion').textContent = status.firmwareVersion || 'N/A';
+        // Update uptime
+        (function(){
+          const upEl = document.getElementById('uptime');
+          if (!upEl) return;
+          const ms = status.uptimeMs || 0;
+          const days = Math.floor(ms / (24*60*60*1000));
+          const hours = Math.floor((ms % (24*60*60*1000)) / (60*60*1000));
+          const minutes = Math.floor((ms % (60*60*1000)) / (60*1000));
+          const parts = [];
+          if (days>0) parts.push(`${days}g`);
+          if (hours>0 || days>0) parts.push(`${hours}h`);
+          parts.push(`${minutes}m`);
+          let text = parts.join(' ');
+          if (status.bootEpoch) {
+            const bootDate = new Date(status.bootEpoch*1000);
+            text += ` (dal ${bootDate.toLocaleDateString()} ${bootDate.toLocaleTimeString()})`;
+          }
+          upEl.textContent = text;
+        })();
+        
+        // Update toggles
+        document.getElementById('bellsMainToggle').checked = status.bellsEnabled || false;
+        document.getElementById('testModeToggle').checked = status.testMode || false;
+        
+      } catch (error) {
+        console.error('Failed to load status:', error);
+      }
+    }
+
+    async function loadTime() {
+      try {
+        const timeData = await apiCall('/api/time');
+        document.getElementById('currentTime').textContent = timeData.time || '--:--:--';
+        document.getElementById('currentDate').textContent = timeData.date || '--/--/----';
+      } catch (error) {
+        console.error('Failed to load time:', error);
+      }
+    }
+
+    // === MELODY MANAGEMENT ===
+    async function loadMelodies() {
+      try {
+        const data = await apiCall('/api/melodies');
+        melodies = data.melodies || [];
+        
+        const select = document.getElementById('melodySelect');
+        select.innerHTML = '<option value="">Seleziona una melodia...</option>';
+        
+        melodies.forEach(melody => {
+          const option = document.createElement('option');
+          option.value = melody.id;
+          option.textContent = `${melody.name} (${melody.noteCount} note)`;
+          select.appendChild(option);
+        });
+        // Popola anche la select semplice
+        const simpleSel = document.getElementById('simpleMelodySelect');
+        if (simpleSel) {
+          simpleSel.innerHTML = '';
+          melodies.forEach(melody => {
+            const opt = document.createElement('option');
+            opt.value = melody.id;
+            opt.textContent = melody.name;
+            simpleSel.appendChild(opt);
+          });
+        }
+        
+      } catch (error) {
+        console.error('Failed to load melodies:', error);
+      }
+    }
+
+    async function loadMelodyDetails(index) {
+      try {
+        const melody = await apiCall(`/api/melody?index=${index}`);
+        document.getElementById('melodyName').value = melody.name || '';
+        
+        const container = document.getElementById('notesContainer');
+        container.innerHTML = '';
+        
+        if (melody.notes) {
+          melody.notes.forEach((note, i) => {
+            addNoteRow(note.bellNumber, note.duration, note.delay);
+          });
+        }
+        
+      } catch (error) {
+        console.error('Failed to load melody details:', error);
+      }
+    }
+
+    function addNoteRow(bellNumber = 1, duration = 300, delay = 800) {
+      const container = document.getElementById('notesContainer');
+      const noteRow = document.createElement('div');
+      noteRow.className = 'note-row';
+      
+      noteRow.innerHTML = `
+        <select class="form-control">
+          <option value="1" ${bellNumber === 1 ? 'selected' : ''}>Campana 1</option>
+          <option value="2" ${bellNumber === 2 ? 'selected' : ''}>Campana 2</option>
+        </select>
+        <input type="number" class="form-control" placeholder="Durata (ms)" value="${duration}" min="50" max="5000" step="10">
+        <input type="number" class="form-control" placeholder="Pausa (ms)" value="${delay}" min="0" max="10000" step="10">
+        <button class="btn btn-danger" onclick="this.parentElement.remove()">🗑️</button>
+      `;
+      
+      container.appendChild(noteRow);
+    }
+
+    function collectNotes() {
+      const notes = [];
+      document.querySelectorAll('#notesContainer .note-row').forEach(row => {
+        const inputs = row.querySelectorAll('input, select');
+        notes.push({
+          bellNumber: parseInt(inputs[0].value),
+          duration: parseInt(inputs[1].value) || 300,
+          delay: parseInt(inputs[2].value) || 800
+        });
+      });
+      return notes;
+    }
+
+    async function playQuick(melodyId) {
+      try {
+        await apiCall('/api/test-melody', {
+          method: 'POST',
+          body: JSON.stringify({ melodyId })
+        });
+        showNotification(`Melodia ${melodyId} avviata`, 'success');
+      } catch (error) {
+        showNotification(`Errore riproduzione melodia ${melodyId}`, 'error');
+      }
+    }
+
+    // === SCHEDULING ===
+    async function loadWeeklySchedules() {
+      try {
+        const data = await apiCall('/api/weekly-schedules');
+        weeklySchedules = data.schedules || [];
+        renderWeeklySchedules();
+      } catch (error) {
+        console.error('Failed to load weekly schedules:', error);
+      }
+    }
+
+    async function loadSpecialEvents() {
+      try {
+        const data = await apiCall('/api/special-events');
+        specialEvents = data.events || [];
+        renderSpecialEvents();
+      } catch (error) {
+        console.error('Failed to load special events:', error);
+      }
+    }
+
+    function renderWeeklySchedules() {
+      const container = document.getElementById('weeklyContainer');
+      container.innerHTML = '';
+      
+      weeklySchedules.forEach((schedule, index) => {
+        const scheduleDiv = document.createElement('div');
+        scheduleDiv.className = 'schedule-item';
+        
+        scheduleDiv.innerHTML = `
+          <div class="schedule-content">
+            <input type="text" class="form-control" placeholder="Nome" value="${schedule.name || ''}" data-field="name">
+            <select class="form-control" data-field="dayOfWeek">
+              <option value="0" ${schedule.dayOfWeek === 0 ? 'selected' : ''}>Domenica</option>
+              <option value="1" ${schedule.dayOfWeek === 1 ? 'selected' : ''}>Lunedì</option>
+              <option value="2" ${schedule.dayOfWeek === 2 ? 'selected' : ''}>Martedì</option>
+              <option value="3" ${schedule.dayOfWeek === 3 ? 'selected' : ''}>Mercoledì</option>
+              <option value="4" ${schedule.dayOfWeek === 4 ? 'selected' : ''}>Giovedì</option>
+              <option value="5" ${schedule.dayOfWeek === 5 ? 'selected' : ''}>Venerdì</option>
+              <option value="6" ${schedule.dayOfWeek === 6 ? 'selected' : ''}>Sabato</option>
+            </select>
+            <input type="time" class="form-control" value="${String(schedule.hour || 0).padStart(2,'0')}:${String(schedule.minute || 0).padStart(2,'0')}" data-field="time">
+            <select class="form-control" data-field="melodyIndex">
+              ${melodies.map(m => `<option value="${m.id}" ${m.id === schedule.melodyIndex ? 'selected' : ''}>${m.name}</option>`).join('')}
+            </select>
+            <label class="switch">
+              <input type="checkbox" ${schedule.isActive ? 'checked' : ''} data-field="isActive">
+              <span class="slider"></span>
+            </label>
+          </div>
+          <button class="btn btn-danger" onclick="removeWeeklySchedule(${index})">🗑️</button>
+        `;
+        
+        container.appendChild(scheduleDiv);
+      });
+    }
+
+    function renderSpecialEvents() {
+      const container = document.getElementById('specialContainer');
+      container.innerHTML = '';
+      
+      specialEvents.forEach((event, index) => {
+        const eventDiv = document.createElement('div');
+        eventDiv.className = 'schedule-item';
+        
+        const dateStr = `${String(event.year || 2025).padStart(4,'0')}-${String(event.month || 1).padStart(2,'0')}-${String(event.day || 1).padStart(2,'0')}`;
+        const timeStr = `${String(event.hour || 0).padStart(2,'0')}:${String(event.minute || 0).padStart(2,'0')}`;
+        
+        eventDiv.innerHTML = `
+          <div class="schedule-content">
+            <input type="text" class="form-control" placeholder="Nome" value="${event.name || ''}" data-field="name">
+            <input type="date" class="form-control" value="${dateStr}" data-field="date">
+            <input type="time" class="form-control" value="${timeStr}" data-field="time">
+            <input type="number" class="form-control" placeholder="Tipo" value="${event.type || 0}" min="0" data-field="type">
+            <select class="form-control" data-field="melodyIndex">
+              ${melodies.map(m => `<option value="${m.id}" ${m.id === event.melodyIndex ? 'selected' : ''}>${m.name}</option>`).join('')}
+            </select>
+            <label class="switch">
+              <input type="checkbox" ${event.isRecurring ? 'checked' : ''} data-field="isRecurring">
+              <span class="slider"></span>
+            </label>
+            <label class="switch">
+              <input type="checkbox" ${event.isActive ? 'checked' : ''} data-field="isActive">
+              <span class="slider"></span>
+            </label>
+          </div>
+          <button class="btn btn-danger" onclick="removeSpecialEvent(${index})">🗑️</button>
+        `;
+        
+        container.appendChild(eventDiv);
+      });
+    }
+
+    function addWeeklySchedule() {
+      weeklySchedules.push({
+        id: Date.now(),
+        name: '',
+        dayOfWeek: 1,
+        hour: 8,
+        minute: 0,
+        melodyIndex: 0,
+        isActive: true
+      });
+      renderWeeklySchedules();
+    }
+
+    // === SEMPLIFICATA: gestione orari ===
+    function renderSimpleTimes() {
+      const container = document.getElementById('simpleTimesList');
+      if (!container) return;
+      container.innerHTML = '';
+      if (simpleTimes.length === 0) {
+        container.innerHTML = '<div style="color:var(--text-light)">Nessun orario aggiunto</div>';
+        return;
+      }
+      simpleTimes.forEach((t, i) => {
+        const row = document.createElement('div');
+        row.className = 'note-row';
+        row.style.gridTemplateColumns = '1fr auto';
+        row.innerHTML = `<div><strong>Orario:</strong> ${t}</div><button class="btn btn-danger" onclick="removeSimpleTime(${i})">🗑️</button>`;
+        container.appendChild(row);
+      });
+    }
+    function addSimpleTime() {
+      const inp = document.getElementById('simpleTimeInput');
+      if (!inp || !inp.value) return;
+      if (!simpleTimes.includes(inp.value)) {
+        simpleTimes.push(inp.value);
+        renderSimpleTimes();
+      }
+    }
+    function removeSimpleTime(i) {
+      simpleTimes.splice(i, 1);
+      renderSimpleTimes();
+    }
+    function clearSimpleTimes() {
+      simpleTimes = [];
+      renderSimpleTimes();
+    }
+
+    // Genera programmazioni da giorni + orari + melodia
+    function generateSchedulesFromSimple() {
+      const name = (document.getElementById('simpleName').value || '').trim() || 'Programmazione';
+      const melodyIndex = parseInt(document.getElementById('simpleMelodySelect').value) || 0;
+      const days = Array.from(document.querySelectorAll('.simple-day:checked')).map(cb => parseInt(cb.value));
+      if (days.length === 0) { showNotification('Seleziona almeno un giorno', 'warning'); return; }
+      if (simpleTimes.length === 0) { showNotification('Aggiungi almeno un orario', 'warning'); return; }
+
+      const created = [];
+      days.forEach(d => {
+        simpleTimes.forEach(t => {
+          const [hour, minute] = t.split(':').map(x => parseInt(x));
+          weeklySchedules.push({
+            id: Date.now() + Math.floor(Math.random()*1000),
+            name,
+            dayOfWeek: d,
+            hour: hour||0,
+            minute: minute||0,
+            melodyIndex,
+            isActive: true
+          });
+          created.push(`${d}@${t}`);
+        });
+      });
+      renderWeeklySchedules();
+      showNotification(`Create ${created.length} programmazioni`, 'success');
+    }
+
+    function addSpecialEvent() {
+      const now = new Date();
+      specialEvents.push({
+        id: Date.now(),
+        name: '',
+        type: 0,
+        year: now.getFullYear(),
+        month: now.getMonth() + 1,
+        day: now.getDate(),
+        hour: 12,
+        minute: 0,
+        melodyIndex: 0,
+        isRecurring: false,
+        isActive: true
+      });
+      renderSpecialEvents();
+    }
+
+    function removeWeeklySchedule(index) {
+      weeklySchedules.splice(index, 1);
+      renderWeeklySchedules();
+    }
+
+    function removeSpecialEvent(index) {
+      specialEvents.splice(index, 1);
+      renderSpecialEvents();
+    }
+
+    function collectWeeklySchedules() {
+      const schedules = [];
+      document.querySelectorAll('#weeklyContainer .schedule-item').forEach((item, index) => {
+        const schedule = { ...weeklySchedules[index] };
+        
+        item.querySelectorAll('[data-field]').forEach(input => {
+          const field = input.getAttribute('data-field');
+          if (field === 'time') {
+            const [hour, minute] = input.value.split(':');
+            schedule.hour = parseInt(hour) || 0;
+            schedule.minute = parseInt(minute) || 0;
+          } else if (field === 'dayOfWeek') {
+            // Conversione esplicita per dayOfWeek da stringa a numero
+            schedule[field] = parseInt(input.value) || 0;
+          } else if (field === 'melodyIndex') {
+            // Conversione esplicita per melodyIndex da stringa a numero
+            schedule[field] = parseInt(input.value) || 0;
+          } else if (input.type === 'checkbox') {
+            schedule[field] = input.checked;
+          } else if (input.type === 'number') {
+            schedule[field] = parseInt(input.value) || 0;
+          } else {
+            schedule[field] = input.value;
+          }
+        });
+        
+        schedules.push(schedule);
+      });
+      return schedules;
+    }
+
+    function collectSpecialEvents() {
+      const events = [];
+      document.querySelectorAll('#specialContainer .schedule-item').forEach((item, index) => {
+        const event = { ...specialEvents[index] };
+        
+        item.querySelectorAll('[data-field]').forEach(input => {
+          const field = input.getAttribute('data-field');
+          if (field === 'date') {
+            const [year, month, day] = input.value.split('-');
+            event.year = parseInt(year) || 2025;
+            event.month = parseInt(month) || 1;
+            event.day = parseInt(day) || 1;
+          } else if (field === 'time') {
+            const [hour, minute] = input.value.split(':');
+            event.hour = parseInt(hour) || 0;
+            event.minute = parseInt(minute) || 0;
+          } else if (field === 'melodyIndex') {
+            // Conversione esplicita per melodyIndex da stringa a numero
+            event[field] = parseInt(input.value) || 0;
+          } else if (input.type === 'checkbox') {
+            event[field] = input.checked;
+          } else if (input.type === 'number') {
+            event[field] = parseInt(input.value) || 0;
+          } else {
+            event[field] = input.value;
+          }
+        });
+        
+        events.push(event);
+      });
+      return events;
+    }
+
+    // === RELAY TESTING ===
+    async function loadRelayStatus() {
+      try {
+        const status = await apiCall('/api/relay-status');
+        document.getElementById('relay1Status').textContent = status.relay1_raw === 0 ? 'ON' : 'OFF';
+        document.getElementById('relay2Status').textContent = status.relay2_raw === 0 ? 'ON' : 'OFF';
+      } catch (error) {
+        console.error('Failed to load relay status:', error);
+      }
+    }
+
+    async function testRelay(relay, duration) {
+      try {
+        await apiCall(`/api/test-relay?relay=${relay}&duration=${duration}`);
+        showNotification(`Test relè ${relay} completato`, 'success');
+        setTimeout(loadRelayStatus, 100);
+      } catch (error) {
+        showNotification(`Errore test relè ${relay}`, 'error');
+      }
+    }
+
+    // === EMERGENCY FUNCTIONS ===
+    async function emergencyStop() {
+      try {
+        await apiCall('/api/emergency-stop', { method: 'POST' });
+        showNotification('STOP DI EMERGENZA ATTIVATO', 'warning');
+      } catch (error) {
+        showNotification('Errore stop di emergenza', 'error');
+      }
+    }
+
+    // === EVENT LISTENERS ===
+    document.addEventListener('DOMContentLoaded', function() {
+      // Tab switching is already handled above
+      
+      // Status controls
+      document.getElementById('bellsMainToggle').addEventListener('change', async function() {
+        try {
+          await apiCall('/api/toggle-bells', {
+            method: 'POST',
+            body: JSON.stringify({ enabled: this.checked })
+          });
+          showNotification(
+            this.checked ? 
+            '🔔 Campane ABILITATE - suoneranno automaticamente' : 
+            '🔇 Campane DISABILITATE - nessun suono automatico', 
+            this.checked ? 'success' : 'warning'
+          );
+          loadStatus();
+        } catch (error) {
+          this.checked = !this.checked;
+          showNotification('Errore cambio stato campane', 'error');
+        }
+      });
+
+      document.getElementById('forceEnableBtn').addEventListener('click', async function() {
+        try {
+          await apiCall('/api/toggle-bells', {
+            method: 'POST',
+            body: JSON.stringify({ enabled: true })
+          });
+          showNotification('🔔 Campane FORZATAMENTE ABILITATE', 'success');
+          loadStatus();
+        } catch (error) {
+          showNotification('Errore abilitazione forzata campane', 'error');
+        }
+      });
+
+      document.getElementById('forceDisableBtn').addEventListener('click', async function() {
+        if (!confirm('Sei sicuro di voler disabilitare le campane?\n\nRicorda: si riabiliteranno automaticamente al prossimo riavvio.')) {
+          return;
+        }
+        
+        try {
+          await apiCall('/api/toggle-bells', {
+            method: 'POST',
+            body: JSON.stringify({ enabled: false })
+          });
+          showNotification('🔇 Campane DISABILITATE temporaneamente\n(Si riabiliteranno al riavvio)', 'warning');
+          loadStatus();
+        } catch (error) {
+          showNotification('Errore disabilitazione campane', 'error');
+        }
+      });
+
+      document.getElementById('emergencyStopBtn').addEventListener('click', async function() {
+        try {
+          await apiCall('/api/emergency-stop', { method: 'POST' });
+          showNotification('🚨 STOP DI EMERGENZA ATTIVATO', 'warning');
+        } catch (error) {
+          showNotification('Errore stop di emergenza', 'error');
+        }
+      });
+
+      document.getElementById('testBell1Btn').addEventListener('click', async function() {
+        try {
+          await apiCall('/api/test-relay?relay=1&duration=500');
+          showNotification('🔔 Test Campana 1 completato', 'success');
+        } catch (error) {
+          showNotification('Errore test Campana 1', 'error');
+        }
+      });
+
+      document.getElementById('testBell2Btn').addEventListener('click', async function() {
+        try {
+          await apiCall('/api/test-relay?relay=2&duration=500');
+          showNotification('🔔 Test Campana 2 completato', 'success');
+        } catch (error) {
+          showNotification('Errore test Campana 2', 'error');
+        }
+      });
+
+      document.getElementById('testModeToggle').addEventListener('change', async function() {
+        try {
+          await apiCall('/api/toggle-test-mode', { method: 'POST' });
+          showNotification(`Modalità test ${this.checked ? 'attivata' : 'disattivata'}`, 'success');
+        } catch (error) {
+          showNotification('Errore cambio modalità test', 'error');
+        }
+      });
+
+      // Melody controls
+      document.getElementById('melodySelect').addEventListener('change', function() {
+        if (this.value) {
+          loadMelodyDetails(this.value);
+        }
+      });
+
+      document.getElementById('playBtn').addEventListener('click', async function() {
+        const melodyId = document.getElementById('melodySelect').value;
+        if (!melodyId) {
+          showNotification('Seleziona una melodia', 'warning');
+          return;
+        }
+        
+        try {
+          await apiCall('/api/test-melody', {
+            method: 'POST',
+            body: JSON.stringify({ melodyId: parseInt(melodyId) })
+          });
+          showNotification('Melodia avviata', 'success');
+        } catch (error) {
+          showNotification('Errore riproduzione melodia', 'error');
+        }
+      });
+
+      document.getElementById('stopBtn').addEventListener('click', async function() {
+        try {
+          await apiCall('/api/stop-melody', { method: 'POST' });
+          showNotification('Melodia fermata', 'success');
+        } catch (error) {
+          showNotification('Errore stop melodia', 'error');
+        }
+      });
+
+      document.getElementById('stopMelodyBtn').addEventListener('click', async function() {
+        try {
+          await apiCall('/api/stop-melody', { method: 'POST' });
+          showNotification('Melodia fermata', 'success');
+        } catch (error) {
+          showNotification('Errore stop melodia', 'error');
+        }
+      });
+
+      // Melody editor
+      document.getElementById('addNoteBtn').addEventListener('click', function() {
+        addNoteRow();
+      });
+
+      document.getElementById('testMelodyBtn').addEventListener('click', async function() {
+        const notes = collectNotes();
+        if (notes.length === 0) {
+          showNotification('Aggiungi almeno una nota', 'warning');
+          return;
+        }
+
+        try {
+          await apiCall('/api/test-melody', {
+            method: 'POST',
+            body: JSON.stringify({ notes })
+          });
+          showNotification('Test melodia avviato', 'success');
+        } catch (error) {
+          showNotification('Errore test melodia', 'error');
+        }
+      });
+
+      document.getElementById('saveMelodyBtn').addEventListener('click', async function() {
+        const melodyId = document.getElementById('melodySelect').value;
+        if (!melodyId) {
+          showNotification('Seleziona una melodia da aggiornare', 'warning');
+          return;
+        }
+
+        const name = document.getElementById('melodyName').value.trim() || 'Senza nome';
+        const notes = collectNotes();
+
+        try {
+          await apiCall('/api/update-melody', {
+            method: 'POST',
+            body: JSON.stringify({
+              index: parseInt(melodyId),
+              name,
+              notes
+            })
+          });
+          showNotification('Melodia aggiornata', 'success');
+          loadMelodies();
+        } catch (error) {
+          showNotification('Errore salvataggio melodia', 'error');
+        }
+      });
+
+      document.getElementById('saveAsNewBtn').addEventListener('click', async function() {
+        const name = document.getElementById('melodyName').value.trim() || 'Nuova melodia';
+        const notes = collectNotes();
+
+        if (notes.length === 0) {
+          showNotification('Aggiungi almeno una nota', 'warning');
+          return;
+        }
+
+        try {
+          const result = await apiCall('/api/save-melody', {
+            method: 'POST',
+            body: JSON.stringify({ name, notes })
+          });
+          showNotification('Nuova melodia salvata', 'success');
+          loadMelodies();
+          if (result.index !== undefined) {
+            document.getElementById('melodySelect').value = result.index;
+          }
+        } catch (error) {
+          showNotification('Errore salvataggio nuova melodia', 'error');
+        }
+      });
+
+      document.getElementById('deleteMelodyBtn').addEventListener('click', async function() {
+        const melodyId = document.getElementById('melodySelect').value;
+        if (!melodyId) {
+          showNotification('Seleziona una melodia da eliminare', 'warning');
+          return;
+        }
+
+        if (!confirm('Sei sicuro di voler eliminare questa melodia?')) {
+          return;
+        }
+
+        try {
+          await apiCall('/api/delete-melody', {
+            method: 'POST',
+            body: JSON.stringify({ index: parseInt(melodyId) })
+          });
+          showNotification('Melodia eliminata', 'success');
+          loadMelodies();
+          document.getElementById('notesContainer').innerHTML = '';
+          document.getElementById('melodyName').value = '';
+        } catch (error) {
+          showNotification('Errore eliminazione melodia', 'error');
+        }
+      });
+
+      // Scheduling
+      document.getElementById('addWeeklyBtn').addEventListener('click', addWeeklySchedule);
+      document.getElementById('addSpecialBtn').addEventListener('click', addSpecialEvent);
+
+      document.getElementById('saveWeeklyBtn').addEventListener('click', async function() {
+        const schedules = collectWeeklySchedules();
+        try {
+          await apiCall('/api/weekly-schedules', {
+            method: 'POST',
+            body: JSON.stringify({ schedules })
+          });
+          showNotification('Programmazione settimanale salvata', 'success');
+          weeklySchedules = schedules;
+        } catch (error) {
+          showNotification('Errore salvataggio programmazione', 'error');
+        }
+      });
+
+      // Semplificata
+      document.getElementById('addSimpleTimeBtn').addEventListener('click', addSimpleTime);
+      document.getElementById('clearSimpleTimesBtn').addEventListener('click', clearSimpleTimes);
+      document.getElementById('generateSchedulesBtn').addEventListener('click', generateSchedulesFromSimple);
+
+      document.getElementById('saveSpecialBtn').addEventListener('click', async function() {
+        const events = collectSpecialEvents();
+        try {
+          await apiCall('/api/special-events', {
+            method: 'POST',
+            body: JSON.stringify({ events })
+          });
+          showNotification('Eventi speciali salvati', 'success');
+          specialEvents = events;
+        } catch (error) {
+          showNotification('Errore salvataggio eventi', 'error');
+        }
+      });
+
+      // Relay testing
+      document.getElementById('refreshRelayBtn').addEventListener('click', loadRelayStatus);
+
+      document.getElementById('manualTestBtn').addEventListener('click', function() {
+        const relay = parseInt(document.getElementById('relaySelect').value);
+        const duration = parseInt(document.getElementById('durationInput').value) || 500;
+        testRelay(relay, duration);
+      });
+
+      // Settings
+      document.getElementById('setTimeBtn').addEventListener('click', async function() {
+        const dateTime = document.getElementById('dateTimeInput').value;
+        if (!dateTime) {
+          showNotification('Seleziona data e ora', 'warning');
+          return;
+        }
+
+        try {
+          await apiCall('/api/set-time', {
+            method: 'POST',
+            body: JSON.stringify({ dateTime: dateTime + (dateTime.length === 16 ? ':00' : '') })
+          });
+          showNotification('Orario impostato', 'success');
+          loadTime();
+          loadStatus();
+        } catch (error) {
+          showNotification('Errore impostazione orario', 'error');
+        }
+      });
+
+      document.getElementById('syncNtpBtn').addEventListener('click', async function() {
+        try {
+          await apiCall('/api/ntp-resync', { method: 'POST' });
+          showNotification('Sincronizzazione NTP completata', 'success');
+          loadTime();
+          loadStatus();
+        } catch (error) {
+          showNotification('Errore sincronizzazione NTP', 'error');
+        }
+      });
+
+      document.getElementById('saveWifiBtn').addEventListener('click', async function() {
+        const ssid = document.getElementById('wifiSSID').value.trim();
+        const password = document.getElementById('wifiPassword').value;
+
+        if (!ssid || !password) {
+          showNotification('Inserisci SSID e password', 'warning');
+          return;
+        }
+
+        try {
+          await apiCall('/api/configure-wifi', {
+            method: 'POST',
+            body: JSON.stringify({ ssid, password })
+          });
+          showNotification('WiFi configurato, dispositivo si riavvierà', 'success');
+        } catch (error) {
+          showNotification('Errore configurazione WiFi', 'error');
+        }
+      });
+
+      // Backup & Restore
+      document.getElementById('backupBtn').addEventListener('click', async function() {
+        try {
+          const data = await apiCall('/api/backup');
+          const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement('a');
+          a.href = url;
+          a.download = `church_backup_${new Date().toISOString().slice(0, 19).replace(/:/g, '-')}.json`;
+          document.body.appendChild(a);
+          a.click();
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+          showNotification('Backup scaricato', 'success');
+        } catch (error) {
+          showNotification('Errore creazione backup', 'error');
+        }
+      });
+
+      document.getElementById('restoreBtn').addEventListener('click', async function() {
+        const file = document.getElementById('restoreFile').files[0];
+        if (!file) {
+          showNotification('Seleziona un file di backup', 'warning');
+          return;
+        }
+
+        try {
+          const text = await file.text();
+          await apiCall('/api/restore', {
+            method: 'POST',
+            body: text
+          });
+          showNotification('Ripristino completato', 'success');
+          // Reload all data
+          loadMelodies();
+          loadWeeklySchedules();
+          loadSpecialEvents();
+        } catch (error) {
+          showNotification('Errore ripristino', 'error');
+        }
+      });
+
+      document.getElementById('reloadBtn').addEventListener('click', function() {
+        loadAllData();
+      });
+    });
+
+    // === INITIALIZATION ===
+    async function loadAllData() {
+      try {
+        await Promise.all([
+          loadStatus(),
+          loadTime(),
+          loadMelodies(),
+          loadWeeklySchedules(),
+          loadSpecialEvents(),
+          loadRelayStatus()
+        ]);
+        console.log('All data loaded successfully');
+      } catch (error) {
+        console.error('Error loading data:', error);
+        showNotification('Errore caricamento dati', 'error');
+      }
+    }
+
+    // Auto-refresh
+    setInterval(loadTime, 1000);
+    setInterval(loadStatus, 10000);
+    setInterval(loadRelayStatus, 5000);
+
+    // Initial load
+    loadAllData();
+    renderSimpleTimes();
+  </script>
+</body>
+</html>
