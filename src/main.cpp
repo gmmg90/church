@@ -12,6 +12,7 @@
 // Include dei nostri file
 #include "include/config.h"
 #include "include/bell_controller.h"
+#include "include/telegram_bot.h"
 
 // Pin I2C di default per ESP32 (T-Display): SDA=21, SCL=22, sovrascrivibili da config.h
 #ifndef I2C_SDA_PIN
@@ -93,6 +94,34 @@ static const char* WEEKLY_FS = "/weekly.json";
 static const char* SPECIAL_FS = "/events.json";
 static const char* MELODIES_FS = "/melodies.json";
  
+
+// === LOG BUFFER ===
+static const int LOG_BUFFER_SIZE = 30;
+static String logRing[LOG_BUFFER_SIZE];
+static int logRingHead = 0;
+static int logRingCount = 0;
+
+void addLog(const String& msg) {
+  time_t now = time(nullptr);
+  struct tm* ti = localtime(&now);
+  char ts[9];
+  snprintf(ts, sizeof(ts), "%02d:%02d:%02d", ti->tm_hour, ti->tm_min, ti->tm_sec);
+  logRing[logRingHead] = String(ts) + " " + msg;
+  logRingHead = (logRingHead + 1) % LOG_BUFFER_SIZE;
+  if (logRingCount < LOG_BUFFER_SIZE) logRingCount++;
+}
+
+String getRecentLogs(int n = 20) {
+  if (!logRingCount) return "Nessun evento registrato.";
+  String result;
+  int count = min(n, logRingCount);
+  int start = (logRingHead - count + LOG_BUFFER_SIZE) % LOG_BUFFER_SIZE;
+  for (int i = 0; i < count; i++) {
+    int idx = (start + i) % LOG_BUFFER_SIZE;
+    result += logRing[idx] + "\n";
+  }
+  return result;
+}
 
 // === DICHIARAZIONI DI FUNZIONE ===
 void updateDisplay();
@@ -477,6 +506,10 @@ void setup() {
   server.begin();
   Serial.println("Web server avviato");
 
+  // Telegram Bot
+  telegramBot.begin();
+  addLog("Avvio sistema v" + String(FIRMWARE_VERSION));
+
   // Prima schermata
   updateDisplay();
 }
@@ -484,6 +517,9 @@ void setup() {
 void loop() {
   // Aggiorna controller campane (non bloccante)
   bellController.update();
+
+  // Telegram Bot polling
+  telegramBot.update();
 
   // Aggiorna temperatura periodicamente
   if (millis() - lastTemperatureCheck >= TEMP_CHECK_INTERVAL) {
@@ -1001,6 +1037,7 @@ void checkAndRunSchedules(){
     if ((int)e.dayOfWeek == dow && e.hour == ti.tm_hour && e.minute == ti.tm_min){
       scheduleFound = true;
       Serial.printf("[SCHED] *** MATCH TROVATO: %s ***\n", e.name);
+      addLog("Schedula: " + String(e.name) + " -> mel." + String(e.melodyIndex));
       
       // Verifica melodia
       int noteCount = bellController.getMelodyNoteCount(e.melodyIndex);
@@ -2037,6 +2074,88 @@ void setupWebServer() {
   // Serve i file statici da SPIFFS (no-cache per evitare UI vecchie)
   // Registrato alla fine per non ombreggiare le API.
   // Protezione Basic Auth per UI statica
+  // === TELEGRAM API ===
+  server.on("/api/telegram/config", HTTP_GET, [](AsyncWebServerRequest *request){
+    if (!request->authenticate(ADMIN_USER, ADMIN_PASSWORD)) return request->requestAuthentication();
+    DynamicJsonDocument doc(1024);
+    doc["enabled"]    = telegramBot.isEnabled();
+    doc["hourlyLog"]  = telegramBot.getHourlyLogEnabled();
+    doc["token"]      = telegramBot.getTokenMasked();
+    JsonArray users   = doc.createNestedArray("users");
+    for (int i = 0; i < MAX_TELEGRAM_USERS; i++) {
+      const TelegramUser* u = telegramBot.getUser(i);
+      if (u && u->isActive) {
+        JsonObject uo = users.createNestedObject();
+        uo["chatId"] = u->chatId;
+        uo["name"]   = u->name;
+      }
+    }
+    String out; serializeJson(doc, out);
+    request->send(200, "application/json", out);
+  });
+
+  server.on("/api/telegram/config", HTTP_POST, [](AsyncWebServerRequest *request){}, NULL,
+    [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total){
+    if (!request->authenticate(ADMIN_USER, ADMIN_PASSWORD)) return request->requestAuthentication();
+    DynamicJsonDocument doc(512);
+    if (deserializeJson(doc, (char*)data, len)) {
+      request->send(400, "application/json", "{\"error\":\"Invalid JSON\"}"); return;
+    }
+    if (doc.containsKey("token"))    telegramBot.setToken(doc["token"].as<const char*>());
+    if (doc.containsKey("enabled"))  telegramBot.setEnabled(doc["enabled"]);
+    if (doc.containsKey("hourlyLog")) telegramBot.setHourlyLogEnabled(doc["hourlyLog"]);
+    telegramBot.saveConfig();
+    telegramBot.begin(); // ricarica con nuovo token se necessario
+    request->send(200, "application/json", "{\"ok\":true}");
+  });
+
+  server.on("/api/telegram/users", HTTP_POST, [](AsyncWebServerRequest *request){}, NULL,
+    [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total){
+    if (!request->authenticate(ADMIN_USER, ADMIN_PASSWORD)) return request->requestAuthentication();
+    DynamicJsonDocument doc(256);
+    if (deserializeJson(doc, (char*)data, len)) {
+      request->send(400, "application/json", "{\"error\":\"Invalid JSON\"}"); return;
+    }
+    String chatId = doc["chatId"] | "";
+    String name   = doc["name"]   | chatId;
+    if (!chatId.length()) { request->send(400, "application/json", "{\"error\":\"chatId required\"}"); return; }
+    bool ok = telegramBot.addUser(chatId, name);
+    request->send(ok ? 200 : 507, "application/json", ok ? "{\"ok\":true}" : "{\"error\":\"Lista piena (max 10)\"}");
+  });
+
+  server.on("/api/telegram/users/remove", HTTP_POST, [](AsyncWebServerRequest *request){}, NULL,
+    [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total){
+    if (!request->authenticate(ADMIN_USER, ADMIN_PASSWORD)) return request->requestAuthentication();
+    DynamicJsonDocument doc(128);
+    if (deserializeJson(doc, (char*)data, len)) {
+      request->send(400, "application/json", "{\"error\":\"Invalid JSON\"}"); return;
+    }
+    String chatId = doc["chatId"] | "";
+    bool ok = telegramBot.removeUser(chatId);
+    request->send(ok ? 200 : 404, "application/json", ok ? "{\"ok\":true}" : "{\"error\":\"Utente non trovato\"}");
+  });
+
+  server.on("/api/telegram/test", HTTP_POST, [](AsyncWebServerRequest *request){}, NULL,
+    [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total){
+    if (!request->authenticate(ADMIN_USER, ADMIN_PASSWORD)) return request->requestAuthentication();
+    DynamicJsonDocument doc(256);
+    deserializeJson(doc, (char*)data, len);
+    String msg = doc["message"] | "Test da interfaccia web";
+    telegramBot.sendMessageToAll("📱 " + msg);
+    request->send(200, "application/json", "{\"ok\":true}");
+  });
+
+  // === LOG API ===
+  server.on("/api/logs", HTTP_GET, [](AsyncWebServerRequest *request){
+    if (!request->authenticate(ADMIN_USER, ADMIN_PASSWORD)) return request->requestAuthentication();
+    int n = 30;
+    if (request->hasParam("n")) n = min(request->getParam("n")->value().toInt(), 30L);
+    DynamicJsonDocument doc(2048);
+    doc["logs"] = getRecentLogs(n);
+    String out; serializeJson(doc, out);
+    request->send(200, "application/json", out);
+  });
+
   server.on("/", HTTP_GET, [](AsyncWebServerRequest *request){
     if (!request->authenticate(ADMIN_USER, ADMIN_PASSWORD)) {
       return request->requestAuthentication();
