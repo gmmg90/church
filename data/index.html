@@ -231,6 +231,8 @@
     <button class="tab" data-pane="p-prog">&#128197; Programmazione</button>
     <button class="tab" data-pane="p-test">&#128295; Test</button>
     <button class="tab" data-pane="p-set">&#9881;&#65039; Impostazioni</button>
+    <button class="tab" data-pane="p-tg">&#128241; Telegram</button>
+    <button class="tab" data-pane="p-api">&#128300; Test API</button>
   </nav>
 
   <!-- TAB: STATO -->
@@ -433,6 +435,137 @@
         <div class="div"></div>
         <button class="btn ghost full" id="reloadBtn">&#8634; Ricarica Dati</button>
       </div>
+    </div>
+  </section>
+
+  <!-- TAB: TELEGRAM -->
+  <section id="p-tg" class="pane">
+    <div class="g2">
+      <div class="col">
+        <div class="card">
+          <div class="card-hd">Configurazione Bot</div>
+          <div class="col">
+            <div class="tog-wrap">
+              <div><div class="tog-lbl">Bot Attivo</div><div class="tog-sub">Abilita ricezione comandi Telegram</div></div>
+              <label class="tog"><input type="checkbox" id="tgEnabled"><span class="tog-track"></span></label>
+            </div>
+            <div class="tog-wrap">
+              <div><div class="tog-lbl">Report Orario</div><div class="tog-sub">Invia log ogni ora a tutti gli utenti</div></div>
+              <label class="tog"><input type="checkbox" id="tgHourlyLog"><span class="tog-track"></span></label>
+            </div>
+            <div class="fg">
+              <label>Token Bot (da @BotFather)</label>
+              <div style="display:flex;gap:6px">
+                <input type="password" id="tgToken" placeholder="1234567890:ABCdef..." style="flex:1">
+                <button class="btn ghost sm shrink" onclick="toggleTgTokenVisibility()">&#128065;</button>
+              </div>
+            </div>
+            <button class="btn gold full" onclick="saveTelegramConfig()">&#128190; Salva Configurazione</button>
+            <button class="btn blue full" onclick="sendTelegramTest()">&#9992; Invia Messaggio di Test</button>
+          </div>
+        </div>
+        <div class="card">
+          <div class="card-hd">Info &amp; Comandi Bot</div>
+          <div class="info-grid" style="font-size:11px;line-height:2">
+            <div>/start &ndash; Menu principale con tastiera</div>
+            <div>/stato &ndash; Stato sistema</div>
+            <div>/melodie &ndash; Lista melodie</div>
+            <div>/suona N &ndash; Suona melodia N</div>
+            <div>/funerale &ndash; Suona FUNERALE</div>
+            <div>/messa &ndash; Suona CHIAMATA MESSA</div>
+            <div>/stop &ndash; Stop di emergenza</div>
+            <div>/campane on|off &ndash; Abilita/disabilita</div>
+            <div>/test 1|2 &ndash; Test campana</div>
+            <div>/log &ndash; Report immediato</div>
+            <div>/chatid &ndash; Mostra il tuo Chat ID</div>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-hd">Gestione Utenti Autorizzati</div>
+        <p style="font-size:11px;color:var(--t3);margin-bottom:12px">Solo gli utenti in questa lista possono controllare il sistema. Ottieni il tuo Chat ID scrivendo a @userinfobot su Telegram.</p>
+        <div class="scroll" id="tgUsersList" style="max-height:280px;margin-bottom:12px"></div>
+        <div style="display:flex;gap:6px;margin-bottom:6px">
+          <div class="fg" style="flex:1"><label>Chat ID</label><input type="text" id="tgNewChatId" placeholder="es. 123456789"></div>
+          <div class="fg" style="flex:1"><label>Nome</label><input type="text" id="tgNewName" placeholder="es. Don Mario"></div>
+        </div>
+        <button class="btn green full" onclick="addTelegramUser()">+ Aggiungi Utente</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- TAB: TEST API -->
+  <section id="p-api" class="pane">
+    <div class="g2">
+      <div class="card">
+        <div class="card-hd">Richiesta API</div>
+        <div class="col">
+          <div class="row">
+            <div class="fg shrink" style="flex:0 0 90px">
+              <label>Metodo</label>
+              <select id="apiMethod">
+                <option value="GET">GET</option>
+                <option value="POST">POST</option>
+              </select>
+            </div>
+            <div class="fg">
+              <label>Endpoint</label>
+              <input type="text" id="apiUrl" placeholder="/api/status" list="apiEndpointList">
+              <datalist id="apiEndpointList">
+                <option value="/api/status">
+                <option value="/api/time">
+                <option value="/api/melodies">
+                <option value="/api/relay-status">
+                <option value="/api/weekly-schedules">
+                <option value="/api/special-events">
+                <option value="/api/emergency-stop">
+                <option value="/api/stop-melody">
+                <option value="/api/toggle-bells">
+                <option value="/api/toggle-test-mode">
+                <option value="/api/ntp-resync">
+                <option value="/api/backup">
+                <option value="/api/telegram/config">
+                <option value="/api/telegram/test">
+                <option value="/api/logs">
+              </datalist>
+            </div>
+          </div>
+          <div class="fg">
+            <label>Body (JSON, solo per POST)</label>
+            <textarea id="apiBody" rows="5" style="width:100%;padding:9px 12px;background:rgba(255,255,255,.05);border:1px solid var(--border);border-radius:8px;color:var(--t1);font:12px 'Space Mono',monospace;outline:none;resize:vertical;transition:all .15s" placeholder='{"key":"value"}'></textarea>
+          </div>
+          <button class="btn gold full" onclick="runApiTest()">&#9654; Invia Richiesta</button>
+          <div style="display:flex;gap:6px;flex-wrap:wrap">
+            <button class="btn ghost sm" onclick="setApiPreset('GET','/api/status','')">Status</button>
+            <button class="btn ghost sm" onclick="setApiPreset('GET','/api/time','')">Time</button>
+            <button class="btn ghost sm" onclick="setApiPreset('GET','/api/relay-status','')">Relay</button>
+            <button class="btn ghost sm" onclick="setApiPreset('POST','/api/emergency-stop','')">EmergStop</button>
+            <button class="btn ghost sm" onclick="setApiPreset('POST','/api/toggle-bells',JSON.stringify({enabled:true}))">Bells ON</button>
+            <button class="btn ghost sm" onclick="setApiPreset('POST','/api/stop-melody','')">Stop</button>
+            <button class="btn ghost sm" onclick="setApiPreset('GET','/api/logs','')">Logs</button>
+            <button class="btn ghost sm" onclick="setApiPreset('GET','/api/telegram/config','')">TG Config</button>
+          </div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="card-hd">Risposta</div>
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+          <span id="apiStatusBadge" class="bdg muted">--</span>
+          <span id="apiDuration" style="font-size:11px;color:var(--t3)"></span>
+          <button class="btn ghost sm" style="margin-left:auto" onclick="copyApiResponse()">&#128203; Copia</button>
+          <button class="btn ghost sm" onclick="clearApiResponse()">&#10006; Cancella</button>
+        </div>
+        <pre id="apiResponse" style="background:rgba(0,0,0,.3);border:1px solid var(--border);border-radius:8px;padding:12px;font:11px/1.6 'Space Mono',monospace;color:var(--t2);overflow:auto;max-height:400px;white-space:pre-wrap;word-break:break-all">Nessuna risposta ancora...</pre>
+      </div>
+    </div>
+    <div class="card mt">
+      <div class="card-hd">Log di Sistema</div>
+      <div style="display:flex;gap:8px;margin-bottom:10px">
+        <button class="btn ghost sm" onclick="loadSystemLogs()">&#8635; Aggiorna</button>
+        <button class="btn ghost sm" onclick="document.getElementById('logOutput').textContent='(svuotato)'">&#10006; Svuota Vista</button>
+        <label style="display:flex;align-items:center;gap:5px;font-size:11px;color:var(--t2);text-transform:none;letter-spacing:0;cursor:pointer;margin-left:auto"><input type="checkbox" id="autoRefreshLogs" style="width:auto" onchange="toggleAutoRefreshLogs(this.checked)"> Auto-aggiorna (5s)</label>
+      </div>
+      <pre id="logOutput" style="background:rgba(0,0,0,.3);border:1px solid var(--border);border-radius:8px;padding:12px;font:11px/1.7 'Space Mono',monospace;color:var(--t2);overflow:auto;max-height:300px;white-space:pre-wrap">Premi Aggiorna per caricare i log...</pre>
     </div>
   </section>
 </main>
@@ -746,6 +879,137 @@ setInterval(loadStatus,10000);
 setInterval(loadRelayStatus,5000);
 loadAllData();
 renderSimpleTimes();
+
+// ═══ TELEGRAM ═══
+async function loadTelegramConfig(){
+  try{
+    const d=await apiCall('/api/telegram/config');
+    document.getElementById('tgEnabled').checked=!!d.enabled;
+    document.getElementById('tgHourlyLog').checked=!!d.hourlyLog;
+    document.getElementById('tgToken').value=d.token||'';
+    renderTelegramUsers(d.users||[]);
+  }catch(e){showNotification('Errore caricamento config Telegram','error');}
+}
+function renderTelegramUsers(users){
+  const c=document.getElementById('tgUsersList');
+  if(!users.length){c.innerHTML='<div class="empty"><span class="ico">&#128101;</span>Nessun utente autorizzato</div>';return;}
+  c.innerHTML=users.map((u,i)=>`
+    <div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--border)">
+      <div style="flex:1">
+        <div style="font-size:13px;font-weight:500">${u.name||'Senza nome'}</div>
+        <div style="font-size:11px;color:var(--t3);font-family:monospace">${u.chatId}</div>
+      </div>
+      <button class="rm-btn" onclick="removeTelegramUser('${u.chatId}')">&#x2715;</button>
+    </div>`).join('');
+}
+async function saveTelegramConfig(){
+  try{
+    const token=document.getElementById('tgToken').value.trim();
+    const enabled=document.getElementById('tgEnabled').checked;
+    const hourlyLog=document.getElementById('tgHourlyLog').checked;
+    await apiCall('/api/telegram/config',{method:'POST',body:JSON.stringify({token,enabled,hourlyLog})});
+    showNotification('Configurazione Telegram salvata','success');
+    loadTelegramConfig();
+  }catch(e){showNotification('Errore salvataggio config Telegram','error');}
+}
+async function addTelegramUser(){
+  const chatId=document.getElementById('tgNewChatId').value.trim();
+  const name=document.getElementById('tgNewName').value.trim();
+  if(!chatId){showNotification('Inserisci il Chat ID','warning');return;}
+  try{
+    await apiCall('/api/telegram/users',{method:'POST',body:JSON.stringify({chatId,name:name||chatId})});
+    showNotification('Utente aggiunto','success');
+    document.getElementById('tgNewChatId').value='';
+    document.getElementById('tgNewName').value='';
+    loadTelegramConfig();
+  }catch(e){showNotification('Errore aggiunta utente','error');}
+}
+async function removeTelegramUser(chatId){
+  if(!confirm('Rimuovere utente '+chatId+'?'))return;
+  try{
+    await apiCall('/api/telegram/users/remove',{method:'POST',body:JSON.stringify({chatId})});
+    showNotification('Utente rimosso','success');
+    loadTelegramConfig();
+  }catch(e){showNotification('Errore rimozione utente','error');}
+}
+async function sendTelegramTest(){
+  try{
+    await apiCall('/api/telegram/test',{method:'POST',body:JSON.stringify({message:'🔔 Test da interfaccia web - '+new Date().toLocaleTimeString('it-IT')})});
+    showNotification('Messaggio di test inviato','success');
+  }catch(e){showNotification('Errore invio messaggio test','error');}
+}
+function toggleTgTokenVisibility(){
+  const i=document.getElementById('tgToken');
+  i.type=i.type==='password'?'text':'password';
+}
+
+// ═══ TEST API ═══
+let _logRefresh=null;
+function setApiPreset(method,url,body){
+  document.getElementById('apiMethod').value=method;
+  document.getElementById('apiUrl').value=url;
+  document.getElementById('apiBody').value=body;
+}
+async function runApiTest(){
+  const method=document.getElementById('apiMethod').value;
+  const url=document.getElementById('apiUrl').value.trim();
+  const bodyStr=document.getElementById('apiBody').value.trim();
+  if(!url){showNotification('Inserisci un endpoint','warning');return;}
+  const statusEl=document.getElementById('apiStatusBadge');
+  const durEl=document.getElementById('apiDuration');
+  const resEl=document.getElementById('apiResponse');
+  statusEl.textContent='...';statusEl.className='bdg muted';
+  resEl.textContent='Caricamento...';durEl.textContent='';
+  const t0=Date.now();
+  try{
+    const opts={method};
+    if(method==='POST'&&bodyStr){opts.body=bodyStr;opts.headers={'Content-Type':'application/json'};}
+    const r=await fetch(url,opts);
+    const dur=Date.now()-t0;
+    const text=await r.text();
+    durEl.textContent=dur+'ms';
+    statusEl.textContent=r.status+' '+r.statusText;
+    statusEl.className='bdg '+(r.ok?'ok':'err');
+    try{resEl.textContent=JSON.stringify(JSON.parse(text),null,2);}
+    catch{resEl.textContent=text||'(risposta vuota)';}
+  }catch(err){
+    durEl.textContent=(Date.now()-t0)+'ms';
+    statusEl.textContent='Errore';statusEl.className='bdg err';
+    resEl.textContent=err.message;
+  }
+}
+function copyApiResponse(){
+  const text=document.getElementById('apiResponse').textContent;
+  navigator.clipboard.writeText(text).then(()=>showNotification('Copiato negli appunti','success')).catch(()=>showNotification('Copia non riuscita','error'));
+}
+function clearApiResponse(){
+  document.getElementById('apiResponse').textContent='Nessuna risposta ancora...';
+  document.getElementById('apiStatusBadge').textContent='--';
+  document.getElementById('apiStatusBadge').className='bdg muted';
+  document.getElementById('apiDuration').textContent='';
+}
+async function loadSystemLogs(){
+  const el=document.getElementById('logOutput');
+  try{
+    const d=await apiCall('/api/logs');
+    el.textContent=d.logs||(Array.isArray(d)?d.join('\n'):'Nessun log disponibile');
+    el.scrollTop=el.scrollHeight;
+  }catch(e){el.textContent='Errore caricamento log: '+e.message;}
+}
+function toggleAutoRefreshLogs(on){
+  clearInterval(_logRefresh);
+  if(on){loadSystemLogs();_logRefresh=setInterval(loadSystemLogs,5000);}
+}
+
+// Carica tab Telegram quando si apre
+document.addEventListener('DOMContentLoaded',()=>{
+  document.querySelectorAll('.tab').forEach(btn=>{
+    btn.addEventListener('click',()=>{
+      if(btn.dataset.pane==='p-tg')loadTelegramConfig();
+      if(btn.dataset.pane==='p-api')loadSystemLogs();
+    });
+  });
+});
 </script>
 </body>
 </html>
