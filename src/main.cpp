@@ -70,9 +70,6 @@ bool schedulerActive = false;
 // Versione firmware
 static const char* FIRMWARE_VERSION = "v2.2";
 
-// Pulsante funerale - polarità (GPIO27 con pullup -> premuto = LOW)
-static bool FUNERAL_PRESSED_LOW = true; // Pulsante con pullup: LOW = premuto
-
 // Timing variables
 unsigned long lastUpdate = 0;
 unsigned long lastNTPCheck = 0;
@@ -249,7 +246,7 @@ bool getLocalTm(struct tm &out) {
 }
 
 bool saveSchedulesToFS() {
-  DynamicJsonDocument doc(16384);
+  DynamicJsonDocument doc(32768);
   JsonArray w = doc.createNestedArray("weekly");
   for (int i=0;i<weeklyCount;i++){
     JsonObject o = w.createNestedObject();
@@ -272,7 +269,7 @@ bool loadSchedulesFromFS() {
   if (!SPIFFS.exists(WEEKLY_FS)) return true; // nothing to load
   fs::File f = SPIFFS.open(WEEKLY_FS, "r");
   if (!f) return false;
-  DynamicJsonDocument doc(16384);
+  DynamicJsonDocument doc(32768);
   DeserializationError err = deserializeJson(doc, f);
   f.close();
   if (err) return false;
@@ -510,98 +507,53 @@ void loop() {
   processSerialCommands();
 
   // Gestione pulsante fisico FUNERALE (debounce + cooldown)
+  // === PULSANTE FUNERALE (GPIO27) ===
+  // INPUT_PULLUP: HIGH = rilasciato, LOW = premuto
   {
     static uint32_t lastPressMs = 0;
-    static bool lastState = true; // pull-up: true=rilasciato
-    static uint32_t lastDebugMs = 0;
-    
-    bool raw = digitalRead(FUNERAL_BUTTON_PIN);
-    bool state = raw; // true=alto, false=basso
-    
-    // Debug semplice ogni 3 secondi
-    if (millis() - lastDebugMs > 3000) {
-      lastDebugMs = millis();
-      Serial.printf("[FUNERAL] GPIO27 = %d\n", raw);
-    }
-    if (lastState != state) {
-      lastState = state;
-      Serial.printf("[BUTTON] GPIO27 cambiato: %d -> %d\n", !state, state);
-      bool isPressed = FUNERAL_PRESSED_LOW ? (!state) : state;
-      Serial.printf("[BUTTON] isPressedLogic: %s (FUNERAL_PRESSED_LOW=%s)\n", 
-                   isPressed ? "PREMUTO" : "rilasciato", FUNERAL_PRESSED_LOW ? "true" : "false");
-      if (isPressed) { // pressione
-        uint32_t now = millis();
-        if (now - lastPressMs > 800) { // debounce
-          lastPressMs = now;
-          // Avvia FUNERALE solo se non sta già suonando qualcosa
-          if (!bellController.isPlayingMelody()) {
-            Serial.println("FUNERALE: pulsante premuto");
-            // Assicura che la melodia 0 esista
-            if (bellController.getMelodyNoteCount(0) == 0) {
-              bellController.loadDefaultMelodies();
-            }
-            // Esegui in modalità test per bypassare campane disabilitate (se lo fossero)
-            bellController.enableTestMode(true);
-            bellController.playMelody(0); // 0 = FUNERALE
-          }
+    static bool lastState = true;
+
+    bool state = (digitalRead(FUNERAL_BUTTON_PIN) == HIGH); // true = rilasciato
+    bool pressed = !state; // LOW = premuto con pullup
+
+    if (pressed && lastState != state) {
+      // fronte di discesa: pulsante appena premuto
+      uint32_t now = millis();
+      if (now - lastPressMs > 800) {
+        lastPressMs = now;
+        if (!bellController.isPlayingMelody()) {
+          Serial.println("[FUNERAL] Pulsante premuto -> FUNERALE");
+          if (bellController.getMelodyNoteCount(0) == 0) bellController.loadDefaultMelodies();
+          bellController.enableTestMode(true);
+          bellController.playMelody(0);
         }
       }
     }
-    // Fallback: se non ci sono stati cambiamenti per >10s, prova a invertire logica
-    static uint32_t lastChangeTime = millis();
-    static int lastRawValue = raw;
-    if (lastRawValue != raw) {
-      lastChangeTime = millis();
-      lastRawValue = raw;
-    }
-    
-    if (millis() - lastChangeTime > 10000) {
-      Serial.printf("[BUTTON] Nessun cambiamento per 10s, inverto polarità: %s -> %s\n",
-                   FUNERAL_PRESSED_LOW ? "LOW" : "HIGH", !FUNERAL_PRESSED_LOW ? "LOW" : "HIGH");
-      FUNERAL_PRESSED_LOW = !FUNERAL_PRESSED_LOW;
-      lastChangeTime = millis();
-    }
+    lastState = state;
   }
 
   // === PULSANTE CHIAMATA MESSA (GPIO32) ===
+  // INPUT_PULLUP: HIGH = rilasciato, LOW = premuto
   {
     static uint32_t lastMassPressMs = 0;
-    static bool lastMassState = true; // pull-up: true=rilasciato
-    static uint32_t lastMassDebugMs = 0;
-    
-    bool massRaw = digitalRead(MASS_BUTTON_PIN);
-    bool massState = massRaw; // true=alto, false=basso
-    
-    // Debug semplice ogni 3 secondi
-    if (millis() - lastMassDebugMs > 3000) {
-      lastMassDebugMs = millis();
-      Serial.printf("[MASS] GPIO32 = %d\n", massRaw);
-    }
-    
-    if (lastMassState != massState) {
-      lastMassState = massState;
-      Serial.printf("[BUTTON] GPIO32 cambiato: %d -> %d\n", !massState, massState);
-      bool isPressed = !massState; // GPIO32 con INPUT_PULLUP: LOW = premuto
-      Serial.printf("[BUTTON] isPressedLogic: %s (GPIO32)\n", 
-                   isPressed ? "PREMUTO" : "rilasciato");
-      if (isPressed) { // pressione
-        uint32_t now = millis();
-        if (now - lastMassPressMs > 800) { // debounce
-          lastMassPressMs = now;
-          // Avvia CHIAMATA MESSA solo se non sta già suonando qualcosa
-          if (!bellController.isPlayingMelody()) {
-            Serial.println("CHIAMATA MESSA: pulsante premuto (GPIO32)");
-            // Assicura che la melodia 1 esista
-            if (bellController.getMelodyNoteCount(1) == 0) {
-              bellController.loadDefaultMelodies();
-            }
-            // Esegui in modalità test per bypassare campane disabilitate
-            bellController.enableTestMode(true);
-            bellController.playMelody(1); // 1 = CHIAMATA MESSA
-          }
+    static bool lastMassState = true;
+
+    bool massState = (digitalRead(MASS_BUTTON_PIN) == HIGH);
+    bool massPressed = !massState;
+
+    if (massPressed && lastMassState != massState) {
+      uint32_t now = millis();
+      if (now - lastMassPressMs > 800) {
+        lastMassPressMs = now;
+        if (!bellController.isPlayingMelody()) {
+          Serial.println("[MASS] Pulsante premuto -> CHIAMATA MESSA");
+          if (bellController.getMelodyNoteCount(1) == 0) bellController.loadDefaultMelodies();
+          bellController.enableTestMode(true);
+          bellController.playMelody(1);
         }
       }
     }
+    lastMassState = massState;
   }
 
   // Gestione pulsante CONFIG (GPIO35):
@@ -816,12 +768,13 @@ void testScheduleNow() {
     // Aspetta e controlla
     unsigned long startTime = millis();
     while (millis() - startTime < 90000) { // 90 secondi
+        bellController.update(); // mantieni la gestione dei relay attiva
         checkAndRunSchedules();
-        delay(1000);
-        
+        delay(100);
+
         // Mostra countdown ogni 10 secondi
         if ((millis() - startTime) % 10000 < 1000) {
-            Serial.printf("Test in corso... %d secondi rimanenti\n", 
+            Serial.printf("Test in corso... %d secondi rimanenti\n",
                          (90000 - (millis() - startTime)) / 1000);
         }
     }
@@ -892,10 +845,9 @@ void processSerialCommands() {
         int relayId = command.substring(11).toInt();
         if (relayId >= 1 && relayId <= 2) {
             Serial.printf("Test relè %d per 500ms...\n", relayId);
-            bool wasTestMode = testMode;
-            testMode = true;
+            bellController.enableTestMode(true);
             bellController.ringBell(relayId, 500);
-            testMode = wasTestMode;
+            bellController.enableTestMode(false);
         } else {
             Serial.printf("ID relè non valido: %d (range: 1-2)\n", relayId);
         }
@@ -1169,20 +1121,19 @@ void connectWiFi() {
         }
         
         if (WiFi.status() == WL_CONNECTED) {
+          file.close();  // chiudi prima di uscire
           Serial.println("");
           Serial.println("✓ CONNESSIONE WiFi RIUSCITA!");
           Serial.print("✓ Indirizzo IP: ");
           Serial.println(WiFi.localIP());
           systemStatus.wifiConnected = true;
           apMode = false;
-          
-          // Riduci ulteriormente la potenza una volta connesso
-          WiFi.setTxPower(WIFI_POWER_8_5dBm); // Ancora più bassa per uso continuo
+
+          WiFi.setTxPower(WIFI_POWER_8_5dBm);
           Serial.println("📡 Potenza WiFi ridotta a 8.5dBm per prevenire surriscaldamento");
-          
-          // Inizializza SNTP con fuso orario Italia e attendi sync
+
           initSNTP(true);
-          
+
           Serial.println("=== FINE CONNESSIONE WiFi ===");
           return;
         }
@@ -1467,8 +1418,9 @@ void setupWebServer() {
       request->send(503, "application/json", "{\"success\":false,\"message\":\"WiFi non connesso\"}");
       return;
     }
-    initSNTP(true);
-    String resp = String("{\"success\":") + (systemStatus.ntpSynced?"true":"false") + ",\"ntpSynced\":" + (systemStatus.ntpSynced?"true":"false") + "}";
+    // initSNTP(false) = configura senza bloccare il task async per 15s
+    initSNTP(false);
+    String resp = String("{\"success\":true,\"message\":\"Resync NTP avviato\",\"ntpSynced\":") + (systemStatus.ntpSynced?"true":"false") + "}";
     request->send(200, "application/json", resp);
   });
 
@@ -1696,22 +1648,12 @@ void setupWebServer() {
         request->send(400, "application/json", "{\"success\":false,\"message\":\"Nessuna nota valida\"}");
         return;
       }
-      // Trova primo slot libero; se non c'è, libera l'ultimo (9)
-      int freeIdx = -1;
-      for (int i = 0; i < 10; i++) {
-        if (bellController.getMelodyNoteCount(i) == 0) { freeIdx = i; break; }
-      }
-      if (freeIdx < 0) { bellController.deleteMelody(9); freeIdx = 9; }
-      bool ok = bellController.addMelody("Test", tempNotes, count);
-      if (!ok) { request->send(500, "application/json", "{\"success\":false,\"message\":\"Impossibile aggiungere melodia\"}"); return; }
-      // Se l'algoritmo di add ha usato un altro slot (primo libero), individua l'indice effettivo
-      int playIdx = freeIdx;
-      for (int i = 0; i < 10; i++) {
-        if (bellController.getMelodyNoteCount(i) == count && String(bellController.getMelodyName(i)) == String("Test")) { playIdx = i; break; }
-      }
-      bellController.playMelody(playIdx);
-      request->send(200, "application/json", String("{\"success\":true,\"message\":\"Test melodia ad-hoc avviato\",\"index\":") + playIdx + "}");
-      Serial.printf("✓ Test melodia ad-hoc con %d note (slot %d)\n", count, playIdx);
+      // Usa sempre lo slot 9 come slot dedicato ai test ad-hoc (non sovrascrive i preset 0-8)
+      const int TEST_SLOT = 9;
+      bellController.updateMelody(TEST_SLOT, "TEST-ADHOC", tempNotes, count);
+      bellController.playMelody(TEST_SLOT);
+      request->send(200, "application/json", String("{\"success\":true,\"message\":\"Test melodia ad-hoc avviato\",\"index\":") + TEST_SLOT + "}");
+      Serial.printf("✓ Test melodia ad-hoc con %d note (slot %d)\n", count, TEST_SLOT);
     } else {
       int melodyId = doc["melodyId"] | -1;
       if (melodyId >= 0 && melodyId < 10 && bellController.getMelodyNoteCount(melodyId) > 0) {
@@ -1877,10 +1819,8 @@ void setupWebServer() {
           manualTimeValid = true;
           Serial.println("[DEBUG] Orario manuale impostato (RTC assente)");
         }
-        // Aggiorna variabili di sistema (simula sync NTP)
         systemStatus.ntpSynced = true;
-        // Forza refresh display
-        updateDisplay();
+        // Il display si aggiorna nel loop() ogni secondo - non chiamare da task async
         request->send(200, "application/json", "{\"success\":true,\"message\":\"Orario aggiornato\"}");
         Serial.print("✓ Richiesta aggiornamento orario: ");
         Serial.println(dateTime);
@@ -1908,24 +1848,21 @@ void setupWebServer() {
     if (index + len < total) { return; }
     String jsonString = *body;
     delete body; request->_tempObject = nullptr;
-    Serial.print("JSON ricevuto: ");
-    Serial.println(jsonString);
-    
-    // Parse semplice senza ArduinoJson per evitare problemi
-    int ssidStart = jsonString.indexOf("\"ssid\":\"") + 8;
-    int ssidEnd = jsonString.indexOf("\"", ssidStart);
-    String newSSID = jsonString.substring(ssidStart, ssidEnd);
-    
-    int passwordStart = jsonString.indexOf("\"password\":\"") + 12;
-    int passwordEnd = jsonString.indexOf("\"", passwordStart);
-    String newPassword = jsonString.substring(passwordStart, passwordEnd);
-    
+
+    DynamicJsonDocument parseDoc(512);
+    if (deserializeJson(parseDoc, jsonString)) {
+      request->send(400, "application/json", "{\"success\":false,\"message\":\"JSON non valido\"}");
+      return;
+    }
+    String newSSID = parseDoc["ssid"] | "";
+    String newPassword = parseDoc["password"] | "";
+
     Serial.print("Nuovo SSID: ");
     Serial.println(newSSID);
     Serial.print("Nuova Password: [NASCOSTA] (");
     Serial.print(newPassword.length());
     Serial.println(" caratteri)");
-    
+
     if (newSSID.length() > 0 && newPassword.length() > 0) {
       // Salva le credenziali su SPIFFS
       DynamicJsonDocument doc(512);
@@ -2008,7 +1945,6 @@ void setupWebServer() {
     bellController.setEnabled(enabled);
     systemStatus.bellsEnabled = enabled;
     bellsEnabled = enabled;
-    updateDisplay();
     request->send(200, "application/json", String("{\"success\":true,\"enabled\":" ) + (enabled?"true":"false") + "}");
   });
   server.on("/api/toggle-bells", HTTP_POST, [](AsyncWebServerRequest *request){}, NULL, [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total){
@@ -2038,7 +1974,6 @@ void setupWebServer() {
     bellController.setEnabled(enabled);
     systemStatus.bellsEnabled = enabled;
     bellsEnabled = enabled;
-    updateDisplay();
     request->send(200, "application/json", String("{\"success\":true,\"enabled\":") + (enabled?"true":"false") + "}");
   });
 
@@ -2067,7 +2002,9 @@ void setupWebServer() {
     request->send(200, "application/json", resp);
   });
 
-  // API diagnostica: impostare direttamente il pin del relè (/api/set-relay?relay=1&value=0)
+  // API diagnostica: test singolo relè con auto-spegnimento (/api/set-relay?relay=1&value=0)
+  // value=0: attiva per BELL_MAX_PULSE ms (auto-off gestito da BellController)
+  // value=1: spegni immediatamente
   server.on("/api/set-relay", HTTP_GET, [](AsyncWebServerRequest *request){
     Serial.println("📡 Richiesta ricevuta: /api/set-relay");
     int relay = 1;
@@ -2084,12 +2021,18 @@ void setupWebServer() {
       return;
     }
 
-    int pin = (relay == 1) ? RELAY1_PIN : RELAY2_PIN;
-    pinMode(pin, OUTPUT);
-    digitalWrite(pin, value ? HIGH : LOW);
+    if (value == 0) {
+      // Attiva tramite BellController per garantire auto-spegnimento
+      bellController.enableTestMode(true);
+      bellController.ringBell((uint8_t)relay, BELL_MAX_PULSE);
+      bellController.enableTestMode(false);
+      Serial.printf("Set relay %d -> ON (auto-off dopo %dms)\n", relay, BELL_MAX_PULSE);
+    } else {
+      bellController.emergencyStop();
+      Serial.printf("Set relay %d -> OFF (emergency stop)\n", relay);
+    }
     String resp = "{\"success\":true,\"relay\":" + String(relay) + ",\"value\":" + String(value) + "}";
     request->send(200, "application/json", resp);
-    Serial.printf("Set relay %d -> %d\n", relay, value);
   });
   // Serve i file statici da SPIFFS (no-cache per evitare UI vecchie)
   // Registrato alla fine per non ombreggiare le API.

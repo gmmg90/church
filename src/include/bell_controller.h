@@ -11,6 +11,13 @@ private:
     uint8_t currentMelodyIndex;
     bool testMode;
 
+    // Stato relay — membri invece di static locali in update()
+    // così emergencyStop() può azzerarli in sicurezza
+    bool bellActive;
+    uint32_t bellStartTime;
+    uint8_t activeBell;
+    uint16_t bellDuration;
+
 public:
     BellController();
     

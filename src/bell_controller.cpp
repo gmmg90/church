@@ -11,6 +11,10 @@ BellController::BellController() {
     currentNoteIndex = 0;
     currentMelodyIndex = 0;
     testMode = false;
+    bellActive = false;
+    bellStartTime = 0;
+    activeBell = 0;
+    bellDuration = 0;
 }
 
 void BellController::begin() {
@@ -160,17 +164,23 @@ void BellController::enableTestMode(bool enable) {
 }
 
 void BellController::update() {
-    static uint32_t bellStartTime = 0;
-    static uint8_t activeBell = 0;
-    static uint16_t bellDuration = 0;
-    static bool bellActive = false;
-    
-    // Gestione timing per singoli colpi di campana
+    // Timeout di sicurezza assoluto: se il relay è attivo da più di BELL_MAX_PULSE+500ms
+    // lo spegniamo forzatamente indipendentemente da qualsiasi altro stato.
+    if (bellActive && (millis() - bellStartTime > (uint32_t)(BELL_MAX_PULSE + 500))) {
+        Serial.printf("[SAFETY] Relay campana %d attivo oltre il tempo massimo! Spegnimento forzato.\n", activeBell);
+        digitalWrite(RELAY1_PIN, HIGH);
+        digitalWrite(RELAY2_PIN, HIGH);
+        digitalWrite(STATUS_LED_PIN, LOW);
+        bellActive = false;
+        if (isPlaying) stopMelody();
+        return;
+    }
+
+    // Disattivazione relay al termine della durata programmata
     if (bellActive && (millis() - bellStartTime >= bellDuration)) {
-        // Disattiva relè
-    digitalWrite(RELAY1_PIN, HIGH);
-    digitalWrite(RELAY2_PIN, HIGH);
-    digitalWrite(STATUS_LED_PIN, LOW);
+        digitalWrite(RELAY1_PIN, HIGH);
+        digitalWrite(RELAY2_PIN, HIGH);
+        digitalWrite(STATUS_LED_PIN, LOW);
         bellActive = false;
         Serial.printf("BellController: Campana %d disattivata\n", activeBell);
     }
@@ -210,6 +220,8 @@ void BellController::emergencyStop() {
     digitalWrite(RELAY2_PIN, HIGH);
     digitalWrite(STATUS_LED_PIN, LOW);
     isPlaying = false;
+    bellActive = false;  // assicura che update() non tenti di gestire un relay già spento
+    bellDuration = 0;
     Serial.println("BellController: STOP DI EMERGENZA!");
 }
 
