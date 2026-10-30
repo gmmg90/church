@@ -279,6 +279,49 @@ bool BellController::updateMelody(uint8_t index, const char* name, BellNote* not
     return true;
 }
 
+// CHIAMATA MESSA ricavata dalla registrazione dello scampanio (WhatsApp 2026-10-06).
+// Due celle da 4 colpi che si alternano:
+//   A: C1 . C2 . C1 C2   (pausa)
+//   B: C1 . C1 . C1 C2   (pausa)
+// Intervalli misurati tra i colpi: 470ms, 440ms, 240ms, poi 700ms prima della cella successiva.
+// L'intervallo reale tra due colpi è max(duration precedente, delay successivo):
+// la durata impulso (200ms) deve restare sotto l'intervallo più breve (240ms).
+// 22 celle (11 coppie A+B) = 88 colpi, circa 40s.
+void BellController::buildMassCall(BellNote* notes) {
+    static const uint8_t cellA[4] = {1, 2, 1, 2};
+    static const uint8_t cellB[4] = {1, 1, 1, 2};
+    static const uint16_t delays[4] = {700, 470, 440, 240};  // pausa PRIMA di ciascun colpo
+    const uint16_t pulse = 200;
+
+    for (int i = 0; i < MASS_CALL_NOTES; ++i) {
+        int cell = i / 4;
+        int pos = i % 4;
+        uint8_t bell = (cell % 2 == 0) ? cellA[pos] : cellB[pos];
+        uint16_t delay = (i == 0) ? 0 : delays[pos];
+        notes[i] = {bell, pulse, delay};
+    }
+}
+
+// Sostituisce la vecchia CHIAMATA MESSA predefinita (100 colpi alternati 1-2, 300/400ms)
+// se è ancora quella salvata su FS e non è stata personalizzata. Ritorna true se aggiornata.
+bool BellController::migrateLegacyMassCall() {
+    BellMelody& m = melodies[1];
+    if (!m.isActive || strcmp(m.name, "CHIAMATA MESSA") != 0 || m.noteCount != 100) {
+        return false;
+    }
+    for (int i = 0; i < m.noteCount; ++i) {
+        const BellNote& n = m.notes[i];
+        if (n.bellNumber != ((i % 2 == 0) ? 1 : 2) || n.duration != 300 || n.delay != 400) {
+            return false;  // personalizzata dall'utente: non toccare
+        }
+    }
+    BellNote chiamata[MASS_CALL_NOTES];
+    buildMassCall(chiamata);
+    updateMelody(1, "CHIAMATA MESSA", chiamata, MASS_CALL_NOTES);
+    Serial.println("BellController: CHIAMATA MESSA aggiornata al nuovo scampanio registrato");
+    return true;
+}
+
 void BellController::loadDefaultMelodies() {
     Serial.println("[DEBUG] BellController::loadDefaultMelodies()");
     // Predefinita: FUNERALE
@@ -299,20 +342,11 @@ void BellController::loadDefaultMelodies() {
         updateMelody(0, "FUNERALE", funerale, 30);
     }
 
-    // Predefinita: CHIAMATA MESSA (alternanza C1 e C2)
-    // Ogni colpo: 300ms di suono + 400ms di pausa (scampanio fitto)
-    // Con scheduler attuale, l'intervallo tra colpi = max(duration, delay) = 400ms.
-    // Per ~40s totali servono ~100 colpi => 50 cicli (2 colpi per ciclo).
-    const int cycles = 50;                     // 50 cicli -> 100 colpi ~ 40s
-    const int totalNotes = cycles * 2;         // alternanza 1-2 per ciclo
-    BellNote chiamata[totalNotes];
-    for (int i = 0; i < totalNotes; ++i) {
-        uint8_t bell = (i % 2 == 0) ? 1 : 2;   // alternanza 1,2,1,2...
-        chiamata[i] = {bell, 300, 400};
-    }
     // Slot 1 dedicato a CHIAMATA MESSA (se libero)
     if (!melodies[1].isActive) {
-        updateMelody(1, "CHIAMATA MESSA", chiamata, totalNotes);
+        BellNote chiamata[MASS_CALL_NOTES];
+        buildMassCall(chiamata);
+        updateMelody(1, "CHIAMATA MESSA", chiamata, MASS_CALL_NOTES);
     }
 
     Serial.println("BellController: Melodie predefinite caricate (FUNERALE, CHIAMATA MESSA)");

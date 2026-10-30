@@ -471,6 +471,9 @@ void setup() {
   if (bellController.getMelodyNoteCount(1) == 0) {
     bellController.loadDefaultMelodies();
   }
+  if (bellController.migrateLegacyMassCall()) {
+    saveAllMelodiesToFS();
+  }
 
   // WiFi e SNTP
   connectWiFi();

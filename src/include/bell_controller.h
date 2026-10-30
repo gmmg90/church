@@ -32,6 +32,10 @@ public:
     bool deleteMelody(uint8_t index);
     bool updateMelody(uint8_t index, const char* name, BellNote* notes, uint8_t noteCount);
     void loadDefaultMelodies();  // Carica melodie predefinite
+    bool migrateLegacyMassCall();  // Aggiorna la vecchia CHIAMATA MESSA predefinita salvata su FS
+
+    static constexpr int MASS_CALL_NOTES = 88;
+    static void buildMassCall(BellNote* notes);
     
     // Getters per API
     int getMelodyCount();
