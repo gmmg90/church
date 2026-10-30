@@ -11,6 +11,18 @@ BellController::BellController() {
     currentNoteIndex = 0;
     currentMelodyIndex = 0;
     testMode = false;
+    relayOffTimer = nullptr;
+}
+
+// Timestamp (µs) per verificare nel log la durata reale dell'impulso
+static volatile int64_t relayOnUs = 0;
+static volatile int64_t relayOffUs = 0;
+
+void BellController::relayOffCallback(void* arg) {
+    digitalWrite(RELAY1_PIN, HIGH);
+    digitalWrite(RELAY2_PIN, HIGH);
+    digitalWrite(STATUS_LED_PIN, LOW);
+    relayOffUs = esp_timer_get_time();
 }
 
 void BellController::begin() {
@@ -24,6 +36,18 @@ void BellController::begin() {
     digitalWrite(RELAY1_PIN, HIGH);
     digitalWrite(RELAY2_PIN, HIGH);
     digitalWrite(STATUS_LED_PIN, LOW);
+
+    const esp_timer_create_args_t timerArgs = {
+        .callback = &BellController::relayOffCallback,
+        .arg = nullptr,
+        .dispatch_method = ESP_TIMER_TASK,
+        .name = "relay_off",
+        .skip_unhandled_events = false
+    };
+    if (esp_timer_create(&timerArgs, &relayOffTimer) != ESP_OK) {
+        Serial.println("BellController: ERRORE creazione timer spegnimento relè");
+        relayOffTimer = nullptr;
+    }
     
     Serial.println("BellController: Inizializzato");
     
@@ -58,6 +82,13 @@ void BellController::ringBell(uint8_t bellNumber, uint16_t duration) {
     // Attiva relè (LOW = attivo per logica invertita)
     digitalWrite(relayPin, LOW);
     digitalWrite(STATUS_LED_PIN, HIGH);
+
+    // Spegnimento garantito dopo 'duration' ms anche se il loop() è bloccato
+    if (relayOffTimer) {
+        esp_timer_stop(relayOffTimer);  // ignora ESP_ERR_INVALID_STATE se non attivo
+        relayOnUs = esp_timer_get_time();
+        esp_timer_start_once(relayOffTimer, (uint64_t)duration * 1000ULL);
+    }
     
     Serial.printf("[BELL] *** CAMPANA %d ATTIVATA *** (pin %d -> LOW, durata %dms)\n", 
                  bellNumber, relayPin, duration);
@@ -166,13 +197,15 @@ void BellController::update() {
     static bool bellActive = false;
     
     // Gestione timing per singoli colpi di campana
-    if (bellActive && (millis() - bellStartTime >= bellDuration)) {
+    // +5ms: il timer hardware ha già spento il relè, qui si aggiorna solo lo stato (e il log è coerente)
+    if (bellActive && (millis() - bellStartTime >= (uint32_t)bellDuration + 5)) {
         // Disattiva relè
     digitalWrite(RELAY1_PIN, HIGH);
     digitalWrite(RELAY2_PIN, HIGH);
     digitalWrite(STATUS_LED_PIN, LOW);
         bellActive = false;
-        Serial.printf("BellController: Campana %d disattivata\n", activeBell);
+        Serial.printf("BellController: Campana %d disattivata (impulso reale %lld ms)\n",
+                      activeBell, (relayOffUs - relayOnUs) / 1000);
     }
     
     // Gestione melodie

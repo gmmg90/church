@@ -2,6 +2,7 @@
 #define BELL_CONTROLLER_H
 
 #include "config.h"
+#include <esp_timer.h>
 
 class BellController {
 private:
@@ -10,6 +11,10 @@ private:
     uint8_t currentNoteIndex;
     uint8_t currentMelodyIndex;
     bool testMode;
+
+    // Spegnimento relè a tempo esatto, indipendente dal loop() (Telegram/HTTPS può bloccarlo per secondi)
+    esp_timer_handle_t relayOffTimer;
+    static void relayOffCallback(void* arg);
 
 public:
     BellController();
