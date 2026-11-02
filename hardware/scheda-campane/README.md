@@ -2,10 +2,10 @@
 
 Circuito stampato 100 × 80 mm su cui si innesta il **LilyGO T-Display ESP32**. La scheda:
 
-- si alimenta a **24 VDC**, con fusibile ripristinabile, protezione dall'inversione di polarità e soppressore di picchi (TVS); un convertitore DC-DC TRACO ricava i 5 V;
+- si alimenta a **24 VDC**, con fusibile ripristinabile, protezione dall'inversione di polarità e soppressore di picchi (TVS); un convertitore DC-DC K7805-1000R3 (ingresso 8–36 V) ricava i 5 V;
 - pilota **4 uscite a 24 V** tramite ULN2003: 2 campane più 2 di riserva, ciascuna con LED. Le uscite sono **spente** quando l'ESP32 è spento, in reset o in programmazione;
 - legge **4 ingressi optoisolati a 24 V**: FUNERALE, MESSA e 2 di riserva, ciascuno con LED;
-- ha l'**orologio DS3231 integrato** con batteria tampone CR2032;
+- ha l'**orologio DS3231M integrato** (stessi registri del DS3231: il firmware non cambia) con batteria tampone CR2032;
 - ha uno **zoccolo per il T-Display** con l'USB-C sul bordo, per programmarlo senza smontarlo, e la zona dell'antenna WiFi senza rame.
 
 Sulla scheda arrivano solo 24 V: **niente 230 V**. I 230 V restano nel quadro elettrico.
@@ -34,12 +34,19 @@ Schema elettrico: [`docs/schema-elettrico.pdf`](docs/schema-elettrico.pdf). Cont
 4. **Controlla l'anteprima del montaggio**, componente per componente. Per alcuni package lo zero di rotazione di JLCPCB è diverso da quello di KiCad. Se un componente appare ruotato, correggilo nell'anteprima con il tasto di rotazione. Verifica in particolare:
    - **D1, D3** (SS34), **D2** (SMBJ33A), **D4–D7** (1N4148W): la banda del catodo deve coincidere con la banda disegnata sulla serigrafia;
    - **LED1–LED10**: catodo verso il segno della serigrafia;
-   - **C1** (elettrolitico): il "+" verso il segno "+" della serigrafia;
-   - **U2** (ULN2003), **U7** (DS3231), **U3–U6** (optoisolatori): il pallino del pin 1 sul segno del pin 1;
+   - **U2** (ULN2003), **U7** (DS3231M), **U3–U6** (optoisolatori): il pallino del pin 1 sul segno del pin 1;
    - **BT1** (portabatteria CR2032).
 5. La **batteria CR2032** non viene montata da JLCPCB: va comprata a parte e inserita.
 
 Prima di ordinare, stampa `docs/scheda-montaggio.png` in **scala 1:1** (100 × 80 mm) e appoggia il T-Display sui due connettori, per controllare che le misure coincidano.
+
+### Costi e come risparmiare
+
+Componenti per 5 schede: circa **48 $** (circa 9,7 $ a scheda, prezzi JLCPCB di novembre 2026). Si aggiungono i 3 $ di caricamento per ogni tipo di componente "Extended" (8 tipi), il circuito stampato, il montaggio e la spedizione.
+
+Per spendere ancora meno:
+- **Saldare tu i componenti a foro passante**: morsetti J1–J9, connettori J10–J11 e convertitore U1, circa 30 saldature. Nella BOM di JLCPCB togli la spunta a queste righe e compra i pezzi su LCSC con gli stessi codici. Eviti il costo del montaggio manuale di JLCPCB e 3 tipi "Extended".
+- **Non montare i canali di riserva**, se non ti servono: togli la spunta a J4, J5, J6, J7, R8, R9, LED4, LED5, U3, U4, R10, R11, LED6, LED7, D4, D5, R14, R15, C5, C6. Il resto della scheda funziona uguale.
 
 ## Collegamenti nel quadro
 

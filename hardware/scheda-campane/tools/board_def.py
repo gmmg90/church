@@ -40,9 +40,10 @@ FP = {
     "R0805": ("Resistor_SMD", "R_0805_2012Metric"),
     "R1206": ("Resistor_SMD", "R_1206_3216Metric"),
     "LED0603": ("LED_SMD", "LED_0603_1608Metric"),
+    "LED0805": ("LED_SMD", "LED_0805_2012Metric"),
     "DCDC": ("Converter_DCDC", "Converter_DCDC_RECOM_R-78E-0.5_THT"),
     "SOIC16": ("Package_SO", "SOIC-16_3.9x9.9mm_P1.27mm"),
-    "SOIC16W": ("Package_SO", "SOIC-16W_7.5x10.3mm_P1.27mm"),
+    "SOIC8": ("Package_SO", "SOIC-8_3.9x4.9mm_P1.27mm"),
     "SMDIP4": ("Package_DIP", "SMDIP-4_W9.53mm"),
     "CR2032": ("Battery", "BatteryHolder_Keystone_3034_1x20mm"),
     "MH": ("MountingHole", "MountingHole_3.2mm_M3"),
@@ -56,7 +57,6 @@ PARTS = {
     "SS34": ("SS34", "Diodo Schottky 3 A 40 V (SMA)", "C8678"),
     "TVS": ("SMBJ33A", "Diodo TVS 600 W 33 V unidirezionale (SMB)", "C224019"),
     "1N4148W": ("1N4148W", "Diodo di segnale (SOD-123)", "C81598"),
-    "C100u": ("100uF 50V", "Condensatore elettrolitico 100 uF 50 V 8x10 mm", "C2836439"),
     "C10u": ("10uF 50V", "Condensatore ceramico 10 uF 50 V X5R (1206)", "C13585"),
     "C22u": ("22uF 25V", "Condensatore ceramico 22 uF 25 V X5R (0805)", "C45783"),
     "C100n": ("100nF 50V", "Condensatore ceramico 100 nF 50 V X7R (0603)", "C14663"),
@@ -65,12 +65,12 @@ PARTS = {
     "R4k7": ("4.7k", "Resistenza 4,7 kOhm 1% (0603)", "C23162"),
     "R10k0805": ("10k", "Resistenza 10 kOhm 1% (0805)", "C17414"),
     "R4k7_1206": ("4.7k", "Resistenza 4,7 kOhm 1% 0,25 W (1206)", "C17936"),
-    "LEDG": ("Verde", "LED verde (0603)", "C12624"),
+    "LEDG": ("Verde", "LED verde (0805)", "C2297"),
     "LEDR": ("Rosso", "LED rosso (0603)", "C2286"),
-    "TSR": ("TSR 1-2450", "Convertitore DC-DC 24 V -> 5 V 1 A TRACO", "C6886877"),
+    "TSR": ("K7805-1000R3", "Convertitore DC-DC 24 V -> 5 V 1 A, ingresso 8-36 V (YLPTEC)", "C2992391"),
     "ULN": ("ULN2003ADR", "Driver Darlington 7 canali (SOIC-16)", "C7512"),
     "PC817": ("PC817X3CSP9F", "Optoisolatore (SMD-4)", "C41807"),
-    "DS3231": ("DS3231SN#T&R", "RTC di precisione I2C (SOIC-16W)", "C9866"),
+    "DS3231": ("DS3231MZ+TRL", "RTC di precisione I2C DS3231M (SOIC-8)", "C107410"),
     "BAT": ("Keystone 3034", "Portabatteria CR2032 SMD", "C5213768"),
     "MH": ("M3", "Foro di fissaggio M3", None),
 }
@@ -88,13 +88,13 @@ add("F1", "F1812", "PTC", 12.0, 61.5, 90, {"1": "+24V_IN", "2": "+24V_F"})
 add("D1", "SMA", "SS34", 12.0, 54.0, 270, {"2": "+24V_F", "1": "+24V"})
 add("D2", "SMB", "TVS", 17.5, 56.0, 270, {"1": "+24V", "2": "GND"})
 add("C2", "C1206", "C10u", 22.0, 56.0, 90, {"1": "+24V", "2": "GND"})
-add("C1", "CP8x10", "C100u", 29.5, 59.0, 270, {"1": "+24V", "2": "GND"})
+add("C1", "C1206", "C10u", 29.5, 59.0, 90, {"1": "+24V", "2": "GND"})
 add("U1", "DCDC", "TSR", 38.0, 62.0, 0, {"1": "+24V", "2": "GND", "3": "+5V_DC"})
 add("C3", "C0805", "C22u", 43.4, 67.0, 0, {"1": "+5V_DC", "2": "GND"})
 add("D3", "SMA", "SS34", 36.0, 68.0, 0, {"2": "+5V_DC", "1": "+5V"})
 add("C4", "C0603", "C100n", 31.0, 68.0, 90, {"1": "+5V", "2": "GND"})
 add("R1", "R0603", "R1k", 24.0, 66.0, 0, {"1": "+5V_DC", "2": "LED_PWR"})
-add("LED1", "LED0603", "LEDG", 24.0, 69.0, 180, {"2": "LED_PWR", "1": "GND"})
+add("LED1", "LED0805", "LEDG", 24.0, 69.0, 180, {"2": "LED_PWR", "1": "GND"})
 
 # ------------------------------------------------------------------ T-Display
 UP_NETS = ["+3V3", "GPIO36", None, None, "GPIO39", "GPIO32", "GPIO33",
@@ -141,7 +141,7 @@ for k, (x0, jref, rin, led, dio, opto, rpu, cf, _name, gpio) in enumerate(INPUTS
     n24, na, nk = f"IN{k}_24", f"IN{k}_A", f"IN{k}_K"
     add(jref, "TB2", "TB2", x0 + 12.0, 5.2, 180, {"1": "+24V", "2": n24})
     add(rin, "R1206", "R4k7_1206", x0 + 7.2, 15.0, 270, {"1": n24, "2": na})
-    add(led, "LED0603", "LEDG", x0 + 4.0, 16.4, 0, {"2": na, "1": nk})
+    add(led, "LED0805", "LEDG", x0 + 4.0, 16.4, 0, {"2": na, "1": nk})
     add(dio, "SOD123", "1N4148W", x0 + 3.3, 12.9, 180, {"1": na, "2": "GND"})
     add(opto, "SMDIP4", "PC817", x0 + 8.0, 20.5, 0, {"1": nk, "2": "GND", "3": "GND", "4": gpio})
     add(rpu, "R0603", "R10k", x0 + 16.0, 19.5, 90, {"1": gpio, "2": "+3V3"})
@@ -149,9 +149,8 @@ for k, (x0, jref, rin, led, dio, opto, rpu, cf, _name, gpio) in enumerate(INPUTS
 
 # ------------------------------------------------------------------ RTC
 add("BT1", "CR2032", "BAT", 17.0, 40.0, 0, {"1": "VBAT", "2": "GND"})
-u7 = {"2": "+3V3", "14": "VBAT", "15": "I2C_SDA", "16": "I2C_SCL", "13": "GND"}
-u7.update({str(p): "GND" for p in range(5, 13)})
-add("U7", "SOIC16W", "DS3231", 37.5, 40.0, 0, u7)
+u7 = {"2": "+3V3", "5": "GND", "6": "VBAT", "7": "I2C_SDA", "8": "I2C_SCL"}
+add("U7", "SOIC8", "DS3231", 37.5, 40.0, 0, u7)
 add("C9", "C0603", "C100n", 32.5, 33.2, 0, {"1": "+3V3", "2": "GND"})
 add("C10", "C0603", "C100n", 45.0, 38.0, 90, {"1": "VBAT", "2": "GND"})
 add("R18", "R0603", "R4k7", 40.0, 32.6, 0, {"1": "+3V3", "2": "I2C_SDA"})
@@ -159,7 +158,7 @@ add("R19", "R0603", "R4k7", 44.2, 32.6, 0, {"1": "+3V3", "2": "I2C_SCL"})
 
 # ------------------------------------------------------------------ LED di stato e 3V3
 add("R20", "R0603", "R1k", 36.0, 50.0, 0, {"1": "LED_STAT", "2": "GPIO2"})
-add("LED10", "LED0603", "LEDG", 32.0, 50.0, 0, {"2": "LED_STAT", "1": "GND"})
+add("LED10", "LED0805", "LEDG", 32.0, 50.0, 0, {"2": "LED_STAT", "1": "GND"})
 add("C11", "C0603", "C100n", 88.5, 54.0, 90, {"1": "+3V3", "2": "GND"})
 
 # ------------------------------------------------------------------ Fori di fissaggio

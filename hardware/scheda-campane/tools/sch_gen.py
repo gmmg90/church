@@ -25,7 +25,6 @@ SYMBOL_FOR_PART = {
     "SS34": "Device:D_Schottky",
     "TVS": "Device:D_Zener",
     "1N4148W": "Device:D",
-    "C100u": "Device:C_Polarized",
     "C10u": "Device:C", "C22u": "Device:C", "C100n": "Device:C",
     "R1k": "Device:R", "R10k": "Device:R", "R4k7": "Device:R",
     "R10k0805": "Device:R", "R4k7_1206": "Device:R",
@@ -33,7 +32,7 @@ SYMBOL_FOR_PART = {
     "TSR": "Regulator_Switching:TSR_1-2450",
     "ULN": "Transistor_Array:ULN2003",
     "PC817": "Isolator:PC817",
-    "DS3231": "Timer_RTC:DS3231M",
+    "DS3231": "Timer_RTC:DS3231MZ",
     "BAT": "Device:Battery_Cell",
 }
 
@@ -47,7 +46,7 @@ BLOCKS = [
                                    "J7", "R11", "LED7", "D5", "U4", "R15", "C6",
                                    "J8", "R12", "LED8", "D6", "U5", "R16", "C7",
                                    "J9", "R13", "LED9", "D7", "U6", "R17", "C8"]),
-    ("OROLOGIO RTC DS3231", ["U7", "BT1", "C9", "C10", "R18", "R19"]),
+    ("OROLOGIO RTC DS3231M", ["U7", "BT1", "C9", "C10", "R18", "R19"]),
 ]
 NOTES = [
     "Uscite: ULN2003 = interruttore verso 0V. Collegare la bobina del rele' d'interfaccia tra +24V e OUTx.",

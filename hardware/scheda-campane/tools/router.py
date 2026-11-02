@@ -534,10 +534,32 @@ def add_gnd_zones(board):
     pcbnew.ZONE_FILLER(board).Fill(board.Zones())
 
 
+def fix_starved_thermals(board):
+    """Pad di massa con connessione termica incompleta: collegamento pieno al piano."""
+    import re
+    import tempfile
+    for _ in range(3):
+        rpt = tempfile.mktemp(suffix=".rpt")
+        pcbnew.WriteDRCReport(board, rpt, pcbnew.EDA_UNITS_MILLIMETRES, True)
+        txt = open(rpt).read()
+        os.remove(rpt)
+        hits = re.findall(r"\[starved_thermal\].*?pad (\S+) \[GND\] of (\S+)", txt, re.S)
+        if not hits:
+            return
+        fps = {fp.GetReference(): fp for fp in board.GetFootprints()}
+        for num, ref in hits:
+            for pad in fps[ref].Pads():
+                if pad.GetNumber() == num:
+                    pad.SetZoneConnection(pcbnew.ZONE_CONNECTION_FULL)
+                    print(f"pad {ref}.{num}: collegamento pieno al piano GND", flush=True)
+        pcbnew.ZONE_FILLER(board).Fill(board.Zones())
+
+
 def main(src, dst):
     board, r = run_routing(src)
     commit(board, r)
     add_gnd_zones(board)
+    fix_starved_thermals(board)
     pcbnew.SaveBoard(dst, board)
     print("salvato", dst, "piste:", len(r.tracks), "via:", len(r.via_list))
 

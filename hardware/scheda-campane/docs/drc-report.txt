@@ -1,5 +1,5 @@
 ** Drc report for scheda-campane.kicad_pcb **
-** Created on 2026-11-02 10:43:35 **
+** Created on 2026-11-02 16:56:17 **
 
 ** Found 0 DRC violations **
 
