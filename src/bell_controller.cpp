@@ -15,15 +15,17 @@ BellController::BellController() {
 
 void BellController::begin() {
     Serial.println("[DEBUG] BellController::begin()");
-    // Inizializza pin relè
+    // Stato iniziale: relè spenti. Il livello di "spento" viene scritto PRIMA di
+    // configurare il pin come uscita, così all'avvio non parte nessun impulso.
+    digitalWrite(RELAY1_PIN, RELAY_OFF_LEVEL);
+    digitalWrite(RELAY2_PIN, RELAY_OFF_LEVEL);
+    digitalWrite(STATUS_LED_PIN, LOW);
     pinMode(RELAY1_PIN, OUTPUT);
     pinMode(RELAY2_PIN, OUTPUT);
     pinMode(STATUS_LED_PIN, OUTPUT);
-    
-    // Stato iniziale: relè spenti (HIGH = spento per relè con logica invertita)
-    digitalWrite(RELAY1_PIN, HIGH);
-    digitalWrite(RELAY2_PIN, HIGH);
-    digitalWrite(STATUS_LED_PIN, LOW);
+    // ripetuto dopo pinMode: con il core Arduino-ESP32 3.x la scrittura precedente viene ignorata
+    digitalWrite(RELAY1_PIN, RELAY_OFF_LEVEL);
+    digitalWrite(RELAY2_PIN, RELAY_OFF_LEVEL);
     
     Serial.println("BellController: Inizializzato");
     
@@ -55,8 +57,8 @@ void BellController::ringBell(uint8_t bellNumber, uint16_t duration) {
     
     uint8_t relayPin = (bellNumber == 1) ? RELAY1_PIN : RELAY2_PIN;
     
-    // Attiva relè (LOW = attivo per logica invertita)
-    digitalWrite(relayPin, LOW);
+    // Attiva relè (livello definito da RELAY_ACTIVE_LOW in config.h)
+    digitalWrite(relayPin, RELAY_ON_LEVEL);
     digitalWrite(STATUS_LED_PIN, HIGH);
     
     Serial.printf("[BELL] *** CAMPANA %d ATTIVATA *** (pin %d -> LOW, durata %dms)\n", 
@@ -168,8 +170,8 @@ void BellController::update() {
     // Gestione timing per singoli colpi di campana
     if (bellActive && (millis() - bellStartTime >= bellDuration)) {
         // Disattiva relè
-    digitalWrite(RELAY1_PIN, HIGH);
-    digitalWrite(RELAY2_PIN, HIGH);
+    digitalWrite(RELAY1_PIN, RELAY_OFF_LEVEL);
+    digitalWrite(RELAY2_PIN, RELAY_OFF_LEVEL);
     digitalWrite(STATUS_LED_PIN, LOW);
         bellActive = false;
         Serial.printf("BellController: Campana %d disattivata\n", activeBell);
@@ -206,8 +208,8 @@ void BellController::update() {
 
 void BellController::emergencyStop() {
     Serial.println("[DEBUG] BellController::emergencyStop()");
-    digitalWrite(RELAY1_PIN, HIGH);
-    digitalWrite(RELAY2_PIN, HIGH);
+    digitalWrite(RELAY1_PIN, RELAY_OFF_LEVEL);
+    digitalWrite(RELAY2_PIN, RELAY_OFF_LEVEL);
     digitalWrite(STATUS_LED_PIN, LOW);
     isPlaying = false;
     Serial.println("BellController: STOP DI EMERGENZA!");

@@ -1,0 +1,23 @@
+Comment,Designator,Footprint,LCSC Part #,Quantity,Descrizione
+Keystone 3034,BT1,BatteryHolder_Keystone_3034_1x20mm,C5213768,1,Portabatteria CR2032 SMD
+100uF 50V,C1,CP_Elec_8x10,C2836439,1,Condensatore elettrolitico 100 uF 50 V 8x10 mm
+10uF 50V,C2,C_1206_3216Metric,C13585,1,Condensatore ceramico 10 uF 50 V X5R (1206)
+22uF 25V,C3,C_0805_2012Metric,C45783,1,Condensatore ceramico 22 uF 25 V X5R (0805)
+100nF 50V,"C4,C5,C6,C7,C8,C9,C10,C11",C_0603_1608Metric,C14663,8,Condensatore ceramico 100 nF 50 V X7R (0603)
+SS34,"D1,D3",D_SMA,C8678,2,Diodo Schottky 3 A 40 V (SMA)
+SMBJ33A,D2,D_SMB,C224019,1,Diodo TVS 600 W 33 V unidirezionale (SMB)
+1N4148W,"D4,D5,D6,D7",D_SOD-123,C81598,4,Diodo di segnale (SOD-123)
+mSMD110-33V,F1,Fuse_1812_4532Metric,C70119,1,"Fusibile ripristinabile 1,1 A 33 V (1812)"
+KF128-5.08-2P,"J1,J2,J3,J4,J5,J6,J7,J8,J9","TerminalBlock_Phoenix_MKDS-1,5-2-5.08_1x02_P5.08mm_Horizontal",C474952,9,"Morsetto a vite 2 poli passo 5,08 mm"
+Female 1x12 2.54 H8.5,"J10,J11",PinSocket_1x12_P2.54mm_Vertical,C22373898,2,"Connettore femmina 1x12 passo 2,54 mm, h 8,5 mm, dorato"
+Verde,"LED1,LED6,LED7,LED8,LED9,LED10",LED_0603_1608Metric,C12624,6,LED verde (0603)
+Rosso,"LED2,LED3,LED4,LED5",LED_0603_1608Metric,C2286,4,LED rosso (0603)
+1k,"R1,R20",R_0603_1608Metric,C21190,2,Resistenza 1 kOhm 1% (0603)
+10k,"R2,R3,R4,R5,R14,R15,R16,R17",R_0603_1608Metric,C25804,8,Resistenza 10 kOhm 1% (0603)
+10k,"R6,R7,R8,R9",R_0805_2012Metric,C17414,4,Resistenza 10 kOhm 1% (0805)
+4.7k,"R10,R11,R12,R13",R_1206_3216Metric,C17936,4,"Resistenza 4,7 kOhm 1% 0,25 W (1206)"
+4.7k,"R18,R19",R_0603_1608Metric,C23162,2,"Resistenza 4,7 kOhm 1% (0603)"
+TSR 1-2450,U1,Converter_DCDC_RECOM_R-78E-0.5_THT,C6886877,1,Convertitore DC-DC 24 V -> 5 V 1 A TRACO
+ULN2003ADR,U2,SOIC-16_3.9x9.9mm_P1.27mm,C7512,1,Driver Darlington 7 canali (SOIC-16)
+PC817X3CSP9F,"U3,U4,U5,U6",SMDIP-4_W9.53mm,C41807,4,Optoisolatore (SMD-4)
+DS3231SN#T&R,U7,SOIC-16W_7.5x10.3mm_P1.27mm,C9866,1,RTC di precisione I2C (SOIC-16W)

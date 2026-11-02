@@ -1,0 +1,10 @@
+** Drc report for scheda-campane.kicad_pcb **
+** Created on 2026-11-02 10:43:35 **
+
+** Found 0 DRC violations **
+
+** Found 0 unconnected pads **
+
+** Found 0 Footprint errors **
+
+** End of Report **

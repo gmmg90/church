@@ -2053,7 +2053,7 @@ void setupWebServer() {
     lastMs = now;
     Serial.println("📡 Richiesta ricevuta: /api/relay-status");
     DynamicJsonDocument doc(256);
-    doc["relay_active_level"] = "LOW (active when LOW)";
+    doc["relay_active_level"] = RELAY_ACTIVE_LOW ? "LOW (active when LOW)" : "HIGH (active when HIGH)";
     doc["enabled"] = systemStatus.bellsEnabled;
     int r1 = -1, r2 = -1, led = -1;
     r1 = digitalRead(RELAY1_PIN);

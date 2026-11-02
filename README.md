@@ -21,7 +21,8 @@ Sistema per il controllo delle campane con ESP32, interfaccia Web, RTC DS3231 e 
 - Relè:
 	- RELAY1_PIN=25 (Campana 1)
 	- RELAY2_PIN=26 (Campana 2)
-	- Active‑low (LOW=ON)
+	- Active‑low (LOW=ON) con i moduli relè originali
+	- Con la **scheda base v1.0** (24 V, ULN2003, ingressi optoisolati, RTC integrato) le uscite sono attive HIGH: compilare con `pio run -e scheda_v1`. Progetto, Gerber e file JLCPCB in [`hardware/scheda-campane`](hardware/scheda-campane/README.md).
 - LED stato su GPIO2
 - Pulsanti:
 	- CONFIG_BUTTON_PIN=0 (T‑Display sinistro, pulsante di boot)

@@ -14,6 +14,16 @@
 #define RELAY1_PIN 25  // Campana 1 (piccola/segnale)
 #define RELAY2_PIN 26  // Campana 2 (grande/principale)
 
+// Logica delle uscite campane:
+//  - RELAY_ACTIVE_LOW 1 -> moduli relè attivi LOW (cablaggio originale, LOW = acceso)
+//  - RELAY_ACTIVE_LOW 0 -> scheda base campane v1.0 con ULN2003 (HIGH = acceso)
+// Per la scheda v1.0 usare l'ambiente PlatformIO "scheda_v1" (imposta 0 automaticamente).
+#ifndef RELAY_ACTIVE_LOW
+#define RELAY_ACTIVE_LOW 1
+#endif
+#define RELAY_ON_LEVEL  (RELAY_ACTIVE_LOW ? LOW : HIGH)
+#define RELAY_OFF_LEVEL (RELAY_ACTIVE_LOW ? HIGH : LOW)
+
 // Buzzer rimosso: non più utilizzato
 
 // Pin per LED di stato

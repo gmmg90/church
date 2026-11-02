@@ -4,3 +4,8 @@
 .vscode/c_cpp_properties.json
 .vscode/launch.json
 .vscode/ipch
+
+# KiCad: file locali e backup
+*.kicad_prl
+fp-info-cache
+*-backups/
