@@ -74,7 +74,14 @@ extern const char* WIFI_PASSWORD;
 
 // Web Server
 #define WEB_SERVER_PORT 80
-#define ADMIN_PASSWORD "LA_TUA_PASSWORD_ADMIN"
+// Password della pagina web: sta in secrets.h (escluso da git, vedi secrets.example.h)
+#if __has_include("secrets.h")
+#include "secrets.h"
+#endif
+#ifndef SECRET_ADMIN_PASSWORD
+#define SECRET_ADMIN_PASSWORD "cambiami"
+#endif
+#define ADMIN_PASSWORD SECRET_ADMIN_PASSWORD
 // Utente per autenticazione Basic (UI Web). Cambia se necessario.
 #ifndef ADMIN_USER
 #define ADMIN_USER "admin"
