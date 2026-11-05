@@ -4,3 +4,7 @@
 .vscode/c_cpp_properties.json
 .vscode/launch.json
 .vscode/ipch
+
+orangepi-pannello/wifi.conf
+orangepi-pannello/campane.conf
+src/include/secrets.h

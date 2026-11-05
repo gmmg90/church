@@ -1,0 +1,21 @@
+# Copia questo file in "campane.conf" e compila i valori.
+# (campane.conf contiene la password: non caricarlo su GitHub.)
+
+# Indirizzo IP dell'ESP32 (lo vedi sul suo display). Meglio se fisso:
+# riservalo nel router (prenotazione DHCP) cosi' non cambia mai.
+ESP_HOST="192.168.1.50"
+
+# Credenziali Web UI dell'ESP32 (ADMIN_USER / ADMIN_PASSWORD in config.h)
+ESP_USER="admin"
+ESP_PASS="LA_TUA_PASSWORD_ADMIN"
+
+# Installare anche lo schermo a tutto schermo (kiosk)? yes / no
+# Metti "no" se l'Orange Pi ha gia' un desktop con avvio automatico.
+KIOSK="yes"
+
+# Utente dedicato che avvia il browser a tutto schermo
+KIOSK_USER="campane"
+
+# Token del tunnel Cloudflare (lo ottieni nel pannello Cloudflare).
+# Se lo lasci vuoto il tunnel si installa dopo, a mano (vedi LEGGIMI.md).
+CF_TOKEN=""

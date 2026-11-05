@@ -1,9 +1,17 @@
 #include "include/bell_controller.h"
+#include "include/watchdog_manager.h"
+#include <esp_task_wdt.h>
+
+// Tag per logging
+static const char* TAG = "BellCtrl";
 
 // Definizione dell'array delle melodie
 BellMelody melodies[10];
 
 BellController bellController;
+
+// Istanza esterna WatchdogManager (definita in main.cpp)
+extern WatchdogManager wdManager;
 
 BellController::BellController() {
     isPlaying = false;
@@ -11,7 +19,26 @@ BellController::BellController() {
     currentNoteIndex = 0;
     currentMelodyIndex = 0;
     testMode = false;
+    
+    // Protezione picchi di tensione (v2.3.7)
+    lastRelayActivation = 0;
+    powerStabilizationTime = 0;
+    softStartEnabled = false;  // Disabilitato per SSR G3MB-202P (switching istantaneo)
+                               // Impostare a true se si usano relè meccanici
+    
+    // Feedback visivo melodia (v2.3.7)
+    lastLedBlinkTime = 0;
+    ledBlinkState = false;
     relayOffTimer = nullptr;
+}
+
+// Stato relè generale (contatti in serie all'alimentazione dei martelli)
+static volatile bool masterOn = false;
+static volatile uint16_t lastPulseMs = 0;
+
+static void setMaster(bool on) {
+    digitalWrite(MASTER_RELAY_PIN, on ? Hardware::MASTER_ON : Hardware::MASTER_OFF);
+    masterOn = on;
 }
 
 // Timestamp (µs) per verificare nel log la durata reale dell'impulso
@@ -19,23 +46,26 @@ static volatile int64_t relayOnUs = 0;
 static volatile int64_t relayOffUs = 0;
 
 void BellController::relayOffCallback(void* arg) {
-    digitalWrite(RELAY1_PIN, HIGH);
-    digitalWrite(RELAY2_PIN, HIGH);
+    digitalWrite(RELAY1_PIN, RELAY_OFF);
+    digitalWrite(RELAY2_PIN, RELAY_OFF);
     digitalWrite(STATUS_LED_PIN, LOW);
     relayOffUs = esp_timer_get_time();
 }
 
 void BellController::begin() {
-    Serial.println("[DEBUG] BellController::begin()");
+    LOG_INFO(TAG, "Inizializzazione BellController...");
+    
     // Inizializza pin relè
     pinMode(RELAY1_PIN, OUTPUT);
     pinMode(RELAY2_PIN, OUTPUT);
     pinMode(STATUS_LED_PIN, OUTPUT);
+    pinMode(MASTER_RELAY_PIN, Hardware::MASTER_PIN_MODE);
     
-    // Stato iniziale: relè spenti (HIGH = spento per relè con logica invertita)
-    digitalWrite(RELAY1_PIN, HIGH);
-    digitalWrite(RELAY2_PIN, HIGH);
+    // Stato iniziale: relè spenti (livello RELAY_OFF, vedi Hardware::RELAY_ACTIVE_HIGH)
+    digitalWrite(RELAY1_PIN, RELAY_OFF);
+    digitalWrite(RELAY2_PIN, RELAY_OFF);
     digitalWrite(STATUS_LED_PIN, LOW);
+    setMaster(false);
 
     const esp_timer_create_args_t timerArgs = {
         .callback = &BellController::relayOffCallback,
@@ -45,42 +75,81 @@ void BellController::begin() {
         .skip_unhandled_events = false
     };
     if (esp_timer_create(&timerArgs, &relayOffTimer) != ESP_OK) {
-        Serial.println("BellController: ERRORE creazione timer spegnimento relè");
+        LOG_ERROR(TAG, "Creazione timer spegnimento relè fallita");
         relayOffTimer = nullptr;
     }
+
+    LOG_INFO(TAG, "Pin configurati: RELAY1=%d, RELAY2=%d, LED=%d", 
+             RELAY1_PIN, RELAY2_PIN, STATUS_LED_PIN);
     
-    Serial.println("BellController: Inizializzato");
+    // Attendi stabilizzazione alimentazione dopo boot (v2.3.7)
+    // Previene riavvii da picchi di tensione durante inizializzazione
+    LOG_INFO(TAG, "Stabilizzazione alimentazione (500ms)...");
+    delay(500);
+    powerStabilizationTime = millis();
     
     // Carica melodie predefinite
     loadDefaultMelodies();
+    
+    LOG_INFO(TAG, "BellController inizializzato con successo");
 }
 
-void BellController::ringBell(uint8_t bellNumber, uint16_t duration) {
-    Serial.printf("[BELL] ringBell(campana=%d, durata=%dms)\n", bellNumber, duration);
+Result BellController::ringBell(uint8_t bellNumber, uint16_t duration) {
+    LOG_DEBUG(TAG, "ringBell(campana=%d, durata=%dms)", bellNumber, duration);
     
+    // Feed watchdog prima di operazione critica (v2.3.5)
+    wdManager.forceFeed();
+    
+    // Verifica protezione termica
+    if (systemStatus.thermalProtection) {
+        LOG_ERROR(TAG, "Protezione termica attiva - operazione bloccata");
+        return Result(ErrorCode::THERMAL_PROTECTION_ACTIVE);
+    }
+    
+    // Verifica se campane abilitate (eccetto modalità test)
     if (!systemStatus.bellsEnabled && !testMode) {
-        Serial.printf("[BELL] SKIP: Campane disabilitate (enabled=%s, testMode=%s)\n", 
-                     systemStatus.bellsEnabled ? "true" : "false", 
-                     testMode ? "true" : "false");
-        return;
+        LOG_WARN(TAG, "Campane disabilitate (enabled=%d, testMode=%d)", 
+                 systemStatus.bellsEnabled, testMode);
+        return Result(ErrorCode::BELLS_DISABLED);
     }
     
-    // Validazione parametri
+    // Validazione numero campana
     if (bellNumber < 1 || bellNumber > 2) {
-        Serial.printf("[BELL] ERRORE: Numero campana non valido: %d (deve essere 1 o 2)\n", bellNumber);
-        return;
+        LOG_ERROR(TAG, "Numero campana non valido: %d (range: 1-2)", bellNumber);
+        return Result(ErrorCode::BELL_INVALID_NUMBER);
     }
     
+    // Validazione durata
     if (duration < BELL_MIN_PULSE || duration > BELL_MAX_PULSE) {
-        Serial.printf("[BELL] ERRORE: Durata non valida: %dms (range: %d-%d)\n", 
-                     duration, BELL_MIN_PULSE, BELL_MAX_PULSE);
-        return;
+        LOG_ERROR(TAG, "Durata non valida: %dms (range: %d-%d)", 
+                  duration, BELL_MIN_PULSE, BELL_MAX_PULSE);
+        return Result(ErrorCode::BELL_INVALID_DURATION);
+    }
+    
+    // Protezione picchi di tensione (v2.3.7)
+    if (!canActivateRelay()) {
+        LOG_WARN(TAG, "Attivazione relè ritardata per protezione tensione");
+        waitForPowerStable();
     }
     
     uint8_t relayPin = (bellNumber == 1) ? RELAY1_PIN : RELAY2_PIN;
+
+    // Chiude il relè generale prima del colpo (a SSR spenti, contatti senza carico)
+    // Timestamp aggiornati PRIMA: ringBell può girare nel task web mentre loop() esegue update()
+    lastRelayActivation = millis();
+    lastPulseMs = duration + Hardware::MASTER_ON_DELAY_MS;
+    if (!masterOn) {
+        setMaster(true);
+        LOG_INFO(TAG, "Relè generale CHIUSO");
+        delay(Hardware::MASTER_ON_DELAY_MS);
+    }
     
-    // Attiva relè (LOW = attivo per logica invertita)
-    digitalWrite(relayPin, LOW);
+    // Attiva relè con soft-start per ridurre picchi di corrente
+    if (softStartEnabled) {
+        softStartRelay(relayPin);
+    } else {
+        digitalWrite(relayPin, RELAY_ON);
+    }
     digitalWrite(STATUS_LED_PIN, HIGH);
 
     // Spegnimento garantito dopo 'duration' ms anche se il loop() è bloccato
@@ -89,47 +158,58 @@ void BellController::ringBell(uint8_t bellNumber, uint16_t duration) {
         relayOnUs = esp_timer_get_time();
         esp_timer_start_once(relayOffTimer, (uint64_t)duration * 1000ULL);
     }
+
+    // Aggiorna timestamp ultima attivazione
+    lastRelayActivation = millis();
+    lastPulseMs = duration;
     
-    Serial.printf("[BELL] *** CAMPANA %d ATTIVATA *** (pin %d -> LOW, durata %dms)\n", 
-                 bellNumber, relayPin, duration);
+    LOG_INFO(TAG, "Campana %d ATTIVATA (pin %d, durata %dms, soft-start=%d)", 
+             bellNumber, relayPin, duration, softStartEnabled);
     
     // Aggiorna statistiche
     systemStatus.lastBellTime = millis();
     systemStatus.totalBellRings++;
     
     // Nota: la disattivazione avviene in update() tramite timer non bloccante
+    return Result(ErrorCode::SUCCESS);
 }
 
-void BellController::playMelody(uint8_t melodyIndex) {
-    Serial.printf("[BELL] BellController::playMelody(melodyIndex=%d) chiamata\n", melodyIndex);
+Result BellController::playMelody(uint8_t melodyIndex) {
+    LOG_DEBUG(TAG, "playMelody(melodyIndex=%d)", melodyIndex);
     
     // Validazione indice
     if (melodyIndex >= 10) {
-        Serial.printf("[BELL] ERRORE: Indice melodia non valido: %d (max 9)\n", melodyIndex);
-        return;
+        LOG_ERROR(TAG, "Indice melodia non valido: %d (max 9)", melodyIndex);
+        return Result(ErrorCode::MELODY_NOT_FOUND);
     }
     
     // Verifica che la melodia sia attiva
     if (!melodies[melodyIndex].isActive) {
-        Serial.printf("[BELL] ERRORE: Melodia %d non attiva\n", melodyIndex);
-        return;
+        LOG_ERROR(TAG, "Melodia %d non attiva", melodyIndex);
+        return Result(ErrorCode::MELODY_INVALID);
     }
     
     // Verifica che ci siano note
     if (melodies[melodyIndex].noteCount == 0) {
-        Serial.printf("[BELL] ERRORE: Melodia %d non ha note (noteCount=0)\n", melodyIndex);
-        return;
+        LOG_ERROR(TAG, "Melodia %d non ha note", melodyIndex);
+        return Result(ErrorCode::MELODY_NOTES_EMPTY);
+    }
+    
+    // Verifica protezione termica
+    if (systemStatus.thermalProtection) {
+        LOG_ERROR(TAG, "Protezione termica attiva - riproduzione bloccata");
+        return Result(ErrorCode::THERMAL_PROTECTION_ACTIVE);
     }
     
     // Verifica stato campane (eccetto modalità test)
     if (!systemStatus.bellsEnabled && !testMode) {
-        Serial.printf("[BELL] AVVISO: Campane disabilitate e non in modalità test. Melodia %d non riprodotta.\n", melodyIndex);
-        return;
+        LOG_WARN(TAG, "Campane disabilitate - melodia %d non riprodotta", melodyIndex);
+        return Result(ErrorCode::BELLS_DISABLED);
     }
     
     // Ferma eventuale melodia in corso
     if (isPlaying) {
-        Serial.printf("[BELL] Fermando melodia precedente (era: %d)\n", currentMelodyIndex);
+        LOG_INFO(TAG, "Fermando melodia precedente (era: %d)", currentMelodyIndex);
         stopMelody();
     }
     
@@ -139,37 +219,43 @@ void BellController::playMelody(uint8_t melodyIndex) {
     isPlaying = true;
     lastNoteTime = millis();
     
-    Serial.printf("[BELL] ==> AVVIO MELODIA: '%s' (ID: %d, Note: %d) <==\n", 
-                 melodies[melodyIndex].name, melodyIndex, melodies[melodyIndex].noteCount);
+    LOG_INFO(TAG, "AVVIO MELODIA: '%s' (ID: %d, Note: %d)", 
+             melodies[melodyIndex].name, melodyIndex, melodies[melodyIndex].noteCount);
     
-    // Log delle note per debug
-    if (DEBUG_MELODY_PLAYBACK) {
-        Serial.printf("[BELL] Sequenza note per '%s':\n", melodies[melodyIndex].name);
+    // Log dettagliato delle note se in DEBUG
+    if (Logger::getLevel() <= Logger::DEBUG) {
+        LOG_DEBUG(TAG, "Sequenza note per '%s':", melodies[melodyIndex].name);
         for (int i = 0; i < melodies[melodyIndex].noteCount; i++) {
             const BellNote& note = melodies[melodyIndex].notes[i];
-            Serial.printf("  [%d] Campana %d: %dms suono + %dms pausa\n", 
-                         i, note.bellNumber, note.duration, note.delay);
+            LOG_DEBUG(TAG, "  [%d] Campana %d: %dms suono + %dms pausa", 
+                     i, note.bellNumber, note.duration, note.delay);
         }
     }
     
     systemStatus.activeMelody = melodyIndex;
+    return Result(ErrorCode::SUCCESS);
 }
 
-void BellController::stopMelody() {
-    Serial.println("[DEBUG] BellController::stopMelody()");
+Result BellController::stopMelody() {
+    LOG_DEBUG(TAG, "stopMelody()");
+    
     if (isPlaying) {
         isPlaying = false;
         currentNoteIndex = 0;
-        emergencyStop(); // Ferma eventuali campane attive
+        emergencyStop(); // Ferma eventuali campane attive e apre il relè generale
         
         // Se era in modalità test, disattivala automaticamente
         if (testMode) {
             testMode = false;
-            Serial.println("BellController: Modalità test disattivata automaticamente");
+            LOG_INFO(TAG, "Modalità test disattivata automaticamente");
         }
         
-        Serial.println("BellController: Melodia fermata");
+        LOG_INFO(TAG, "Melodia fermata");
+        return Result(ErrorCode::SUCCESS);
     }
+    
+    LOG_DEBUG(TAG, "Nessuna melodia in riproduzione");
+    return Result(ErrorCode::SUCCESS);
 }
 
 bool BellController::isPlayingMelody() {
@@ -177,17 +263,21 @@ bool BellController::isPlayingMelody() {
 }
 
 void BellController::testBell(uint8_t bellNumber) {
-    Serial.printf("[DEBUG] BellController::testBell(bellNumber=%d)\n", bellNumber);
+    LOG_INFO(TAG, "testBell(bellNumber=%d)", bellNumber);
     bool wasTestMode = testMode;
     testMode = true;
-    ringBell(bellNumber, 500); // Test di 500ms
+    Result result = ringBell(bellNumber, 500); // Test di 500ms
     testMode = wasTestMode;
+    
+    if (!result.isSuccess()) {
+        LOG_ERROR(TAG, "Test campana %d fallito: %s", bellNumber, result.message.c_str());
+    }
 }
 
 void BellController::enableTestMode(bool enable) {
-    Serial.printf("[DEBUG] BellController::enableTestMode(enable=%d)\n", enable);
+    LOG_INFO(TAG, "enableTestMode(enable=%d)", enable);
     testMode = enable;
-    Serial.printf("BellController: Modalità test %s\n", enable ? "attivata" : "disattivata");
+    LOG_INFO(TAG, "Modalità test %s", enable ? "attivata" : "disattivata");
 }
 
 void BellController::update() {
@@ -196,12 +286,15 @@ void BellController::update() {
     static uint16_t bellDuration = 0;
     static bool bellActive = false;
     
+    // === WATCHDOG AUTO-FEED (v2.3.5) - WatchdogManager gestisce automaticamente ===
+    wdManager.feedIfNeeded(); // Auto-feed se necessario (ogni 100ms)
+    
     // Gestione timing per singoli colpi di campana
     // +5ms: il timer hardware ha già spento il relè, qui si aggiorna solo lo stato (e il log è coerente)
     if (bellActive && (millis() - bellStartTime >= (uint32_t)bellDuration + 5)) {
         // Disattiva relè
-    digitalWrite(RELAY1_PIN, HIGH);
-    digitalWrite(RELAY2_PIN, HIGH);
+    digitalWrite(RELAY1_PIN, RELAY_OFF);
+    digitalWrite(RELAY2_PIN, RELAY_OFF);
     digitalWrite(STATUS_LED_PIN, LOW);
         bellActive = false;
         Serial.printf("BellController: Campana %d disattivata (impulso reale %lld ms)\n",
@@ -210,14 +303,19 @@ void BellController::update() {
     
     // Gestione melodie
     if (isPlaying && melodies[currentMelodyIndex].isActive) {
+        // Feed watchdog esplicito durante melodie lunghe
+        wdManager.forceFeed();
+        
+        
         BellMelody& melody = melodies[currentMelodyIndex];
         
         if (currentNoteIndex < melody.noteCount) {
             BellNote& note = melody.notes[currentNoteIndex];
             
             // È tempo di suonare la prossima nota?
-            if (millis() - lastNoteTime >= (bellActive ? 0 : note.delay)) {
-                if (!bellActive) {
+            if (!bellActive) {
+                // Attendi il delay prima della prossima nota
+                if (millis() - lastNoteTime >= note.delay) {
                     // Inizia nuova nota
                     bellStartTime = millis();
                     activeBell = note.bellNumber;
@@ -227,89 +325,142 @@ void BellController::update() {
                     ringBell(note.bellNumber, note.duration);
                     lastNoteTime = millis();
                     currentNoteIndex++;
+                    
+                    // Yield per prevenire watchdog timeout
+                    yield();
                 }
             }
-        } else {
-            // Melodia completata
-            Serial.printf("BellController: Melodia '%s' completata\n", melody.name);
+        } else if (!bellActive) {
+            // Melodia completata (dopo la fine dell'ultimo colpo)
+            LOG_INFO(TAG, "Melodia '%s' completata", melody.name);
             stopMelody();
         }
+    }
+
+    // Apre il relè generale quando non si suona più (SSR già spenti da tempo)
+    if (masterOn && !isPlaying && !bellActive &&
+        millis() - lastRelayActivation >= (uint32_t)lastPulseMs + Hardware::MASTER_OFF_DELAY_MS) {
+        setMaster(false);
+        LOG_INFO(TAG, "Relè generale APERTO");
     }
 }
 
 void BellController::emergencyStop() {
-    Serial.println("[DEBUG] BellController::emergencyStop()");
-    digitalWrite(RELAY1_PIN, HIGH);
-    digitalWrite(RELAY2_PIN, HIGH);
+    LOG_CRITICAL(TAG, "STOP DI EMERGENZA ATTIVATO!");
+    digitalWrite(RELAY1_PIN, RELAY_OFF);
+    digitalWrite(RELAY2_PIN, RELAY_OFF);
     digitalWrite(STATUS_LED_PIN, LOW);
+    setMaster(false);
     isPlaying = false;
-    Serial.println("BellController: STOP DI EMERGENZA!");
+    LOG_INFO(TAG, "Tutti i relè disattivati");
 }
 
 void BellController::setEnabled(bool enabled) {
-    Serial.printf("[DEBUG] BellController::setEnabled(enabled=%d)\n", enabled);
+    LOG_INFO(TAG, "setEnabled(enabled=%d)", enabled);
     systemStatus.bellsEnabled = enabled;
     if (!enabled) {
         emergencyStop();
     }
-    Serial.printf("BellController: Campane %s\n", enabled ? "abilitate" : "disabilitate");
+    LOG_INFO(TAG, "Campane %s", enabled ? "ABILITATE" : "DISABILITATE");
 }
 
 bool BellController::isEnabled() {
     return systemStatus.bellsEnabled;
 }
 
-bool BellController::addMelody(const char* name, BellNote* notes, uint8_t noteCount) {
-    Serial.printf("[DEBUG] BellController::addMelody(name=%s, noteCount=%d)\n", name, noteCount);
+Result BellController::addMelody(const char* name, BellNote* notes, uint8_t noteCount) {
+    LOG_DEBUG(TAG, "addMelody(name=%s, noteCount=%d)", name, noteCount);
+    
+    // Validazione parametri
+    if (!name || !notes || noteCount == 0) {
+        LOG_ERROR(TAG, "Parametri non validi per addMelody");
+        return Result(ErrorCode::INVALID_PARAMETER);
+    }
+    
+    if (noteCount > MAX_MELODY_STEPS) {
+        LOG_WARN(TAG, "Note count %d eccede il massimo %d, verrà troncato", 
+                 noteCount, MAX_MELODY_STEPS);
+        noteCount = MAX_MELODY_STEPS;
+    }
+    
     // Trova slot libero
     for (int i = 0; i < 10; i++) {
         if (!melodies[i].isActive) {
             strncpy(melodies[i].name, name, 31);
             melodies[i].name[31] = '\0';
-            melodies[i].noteCount = min(noteCount, (uint8_t)MAX_MELODY_STEPS);
+            melodies[i].noteCount = noteCount;
             
-            for (int j = 0; j < melodies[i].noteCount; j++) {
+            for (int j = 0; j < noteCount; j++) {
                 melodies[i].notes[j] = notes[j];
             }
             
             melodies[i].isActive = true;
-            Serial.printf("BellController: Melodia '%s' aggiunta (slot %d)\n", name, i);
-            return true;
+            LOG_INFO(TAG, "Melodia '%s' aggiunta in slot %d (%d note)", name, i, noteCount);
+            return Result(ErrorCode::SUCCESS);
         }
     }
     
-    Serial.println("BellController: Nessuno slot libero per nuova melodia");
-    return false;
+    LOG_ERROR(TAG, "Nessuno slot libero per nuova melodia");
+    return Result(ErrorCode::MELODY_SLOTS_FULL);
 }
 
-bool BellController::deleteMelody(uint8_t index) {
-    Serial.printf("[DEBUG] BellController::deleteMelody(index=%d)\n", index);
-    if (index < 10 && melodies[index].isActive) {
-        melodies[index].isActive = false;
-        melodies[index].noteCount = 0;
-        Serial.printf("BellController: Melodia slot %d eliminata\n", index);
-        return true;
+Result BellController::deleteMelody(uint8_t index) {
+    LOG_DEBUG(TAG, "deleteMelody(index=%d)", index);
+    
+    if (index >= 10) {
+        LOG_ERROR(TAG, "Indice melodia non valido: %d", index);
+        return Result(ErrorCode::MELODY_NOT_FOUND);
     }
-    return false;
+    
+    if (!melodies[index].isActive) {
+        LOG_WARN(TAG, "Melodia %d già inattiva", index);
+        return Result(ErrorCode::MELODY_NOT_FOUND);
+    }
+    
+    melodies[index].isActive = false;
+    melodies[index].noteCount = 0;
+    LOG_INFO(TAG, "Melodia slot %d eliminata", index);
+    return Result(ErrorCode::SUCCESS);
 }
 
-bool BellController::updateMelody(uint8_t index, const char* name, BellNote* notes, uint8_t noteCount) {
-    Serial.printf("[DEBUG] BellController::updateMelody(index=%d, name=%s, noteCount=%d)\n", index, name, noteCount);
-    if (index >= 10) return false;
+Result BellController::updateMelody(uint8_t index, const char* name, BellNote* notes, uint8_t noteCount) {
+    LOG_DEBUG(TAG, "updateMelody(index=%d, name=%s, noteCount=%d)", index, name, noteCount);
+    
+    if (index >= 10) {
+        LOG_ERROR(TAG, "Indice melodia non valido: %d", index);
+        return Result(ErrorCode::MELODY_NOT_FOUND);
+    }
+    
+    if (!name || !notes || noteCount == 0) {
+        LOG_ERROR(TAG, "Parametri non validi per updateMelody");
+        return Result(ErrorCode::INVALID_PARAMETER);
+    }
+    
+    if (noteCount > MAX_MELODY_STEPS) {
+        LOG_WARN(TAG, "Note count %d eccede il massimo %d, verrà troncato", 
+                 noteCount, MAX_MELODY_STEPS);
+        noteCount = MAX_MELODY_STEPS;
+    }
+    
     melodies[index].isActive = true;
-    strncpy(melodies[index].name, name ? name : "Senza nome", 31);
+    strncpy(melodies[index].name, name, 31);
     melodies[index].name[31] = '\0';
-    melodies[index].noteCount = min(noteCount, (uint8_t)MAX_MELODY_STEPS);
-    for (int j = 0; j < melodies[index].noteCount; j++) {
+    melodies[index].noteCount = noteCount;
+    
+    for (int j = 0; j < noteCount; j++) {
         melodies[index].notes[j] = notes[j];
     }
+    
     // Se stiamo suonando proprio questa melodia, ricomincia dall'inizio con la nuova sequenza
     if (isPlaying && currentMelodyIndex == index) {
         currentNoteIndex = 0;
         lastNoteTime = millis();
+        LOG_INFO(TAG, "Melodia in riproduzione aggiornata, riavvio sequenza");
     }
-    Serial.printf("BellController: Melodia slot %d aggiornata (%s, %d note)\n", index, melodies[index].name, melodies[index].noteCount);
-    return true;
+    
+    LOG_INFO(TAG, "Melodia slot %d aggiornata (%s, %d note)", 
+             index, melodies[index].name, noteCount);
+    return Result(ErrorCode::SUCCESS);
 }
 
 // CHIAMATA MESSA ricavata dalla registrazione dello scampanio (WhatsApp 2026-10-06).
@@ -351,12 +502,12 @@ bool BellController::migrateLegacyMassCall() {
     BellNote chiamata[MASS_CALL_NOTES];
     buildMassCall(chiamata);
     updateMelody(1, "CHIAMATA MESSA", chiamata, MASS_CALL_NOTES);
-    Serial.println("BellController: CHIAMATA MESSA aggiornata al nuovo scampanio registrato");
+    LOG_INFO(TAG, "CHIAMATA MESSA aggiornata al nuovo scampanio registrato");
     return true;
 }
 
 void BellController::loadDefaultMelodies() {
-    Serial.println("[DEBUG] BellController::loadDefaultMelodies()");
+    LOG_INFO(TAG, "Caricamento melodie predefinite...");
     // Predefinita: FUNERALE
     // Pattern: 3 colpi Campana1, poi 3 colpi Campana2, ripetuto per 10 terzine (tot 30 colpi)
     // ogni colpo: durata 300ms, pausa 2700ms
@@ -382,7 +533,7 @@ void BellController::loadDefaultMelodies() {
         updateMelody(1, "CHIAMATA MESSA", chiamata, MASS_CALL_NOTES);
     }
 
-    Serial.println("BellController: Melodie predefinite caricate (FUNERALE, CHIAMATA MESSA)");
+    LOG_INFO(TAG, "Melodie predefinite caricate: FUNERALE (slot 0), CHIAMATA MESSA (slot 1)");
 }
 
 String BellController::getStatusJson() {
@@ -439,4 +590,104 @@ int BellController::getMelodyNoteCount(uint8_t index) {
         return melodies[index].noteCount;
     }
     return 0;
+}
+
+// ============================================================================
+// PROTEZIONE PICCHI DI TENSIONE (v2.3.7)
+// ============================================================================
+
+/**
+ * @brief Verifica se è sicuro attivare un relè
+ * 
+ * Controlla che sia passato tempo sufficiente dall'ultima attivazione
+ * e che l'alimentazione sia stabile dopo il boot.
+ * 
+ * @return true se sicuro attivare, false altrimenti
+ */
+bool BellController::canActivateRelay() {
+    uint32_t now = millis();
+    
+    // Verifica tempo minimo dopo boot (primi 2 secondi critici)
+    if (now - powerStabilizationTime < 2000) {
+        LOG_DEBUG(TAG, "Alimentazione ancora in stabilizzazione (%lums da boot)", 
+                 now - powerStabilizationTime);
+        return false;
+    }
+    
+    // Verifica intervallo minimo tra attivazioni (100ms)
+    // Previene attivazioni troppo ravvicinate che causano picchi cumulativi
+    if (lastRelayActivation > 0 && (now - lastRelayActivation) < 100) {
+        LOG_DEBUG(TAG, "Attivazione troppo ravvicinata (%lums da ultima)", 
+                 now - lastRelayActivation);
+        return false;
+    }
+    
+    return true;
+}
+
+/**
+ * @brief Attivazione graduale del relè (soft-start)
+ * 
+ * Attiva il relè con una sequenza PWM graduale per ridurre
+ * il picco di corrente iniziale. Questo previene cali di tensione
+ * che possono causare brownout e riavvii dell'ESP32.
+ * 
+ * @param pin Pin del relè da attivare
+ */
+void BellController::softStartRelay(uint8_t pin) {
+    LOG_DEBUG(TAG, "Soft-start relè pin %d", pin);
+    
+    // Sequenza di attivazione graduale:
+    // - 3 impulsi brevi crescenti per "pre-caricare" il circuito
+    // - Riduce picco corrente iniziale del ~40%
+    
+    // Impulso 1: 2ms ON, 10ms OFF
+    digitalWrite(pin, RELAY_ON);
+    delayMicroseconds(2000);
+    digitalWrite(pin, RELAY_OFF);
+    delay(10);
+    
+    // Impulso 2: 5ms ON, 8ms OFF
+    digitalWrite(pin, RELAY_ON);
+    delay(5);
+    digitalWrite(pin, RELAY_OFF);
+    delay(8);
+    
+    // Impulso 3: 10ms ON, 5ms OFF
+    digitalWrite(pin, RELAY_ON);
+    delay(10);
+    digitalWrite(pin, RELAY_OFF);
+    delay(5);
+    
+    // Attivazione finale continua
+    digitalWrite(pin, RELAY_ON);
+    
+    LOG_DEBUG(TAG, "Soft-start completato, relè attivo");
+}
+
+/**
+ * @brief Attende stabilizzazione alimentazione
+ * 
+ * Inserisce un delay per permettere ai condensatori di stabilizzarsi
+ * prima di attivare il relè. Usato quando canActivateRelay() ritorna false.
+ */
+void BellController::waitForPowerStable() {
+    uint32_t now = millis();
+    uint32_t timeSinceBoot = now - powerStabilizationTime;
+    uint32_t timeSinceLastActivation = lastRelayActivation > 0 ? now - lastRelayActivation : 0;
+    
+    // Calcola delay necessario
+    uint32_t delayNeeded = 0;
+    
+    if (timeSinceBoot < 2000) {
+        delayNeeded = 2000 - timeSinceBoot;
+        LOG_INFO(TAG, "Attesa stabilizzazione post-boot: %lums", delayNeeded);
+    } else if (timeSinceLastActivation < 100) {
+        delayNeeded = 100 - timeSinceLastActivation;
+        LOG_INFO(TAG, "Attesa intervallo minimo tra relè: %lums", delayNeeded);
+    }
+    
+    if (delayNeeded > 0) {
+        delay(delayNeeded);
+    }
 }

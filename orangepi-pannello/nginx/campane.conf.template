@@ -1,0 +1,72 @@
+# Pannello campane - nginx su Orange Pi
+# File generato da install.sh a partire da questo modello.
+# Entrambe le porte ascoltano SOLO su 127.0.0.1: dall'esterno si arriva
+# unicamente tramite il tunnel Cloudflare (e dal touchscreen locale).
+
+proxy_cache_path /var/cache/nginx/campane levels=1 keys_zone=campane:1m max_size=5m inactive=30s use_temp_path=off;
+
+# ------------------------------------------------------------------
+# 8080 - Pannello touch (pagina nuova) + API filtrate verso l'ESP32
+# ------------------------------------------------------------------
+server {
+    listen 127.0.0.1:8080;
+    server_name _;
+    root /opt/campane/panel;
+    index index.html;
+
+    client_max_body_size 64k;
+
+    location = / {
+        try_files /index.html =404;
+        add_header Cache-Control "no-cache";
+    }
+    location = /index.html {
+        add_header Cache-Control "no-cache";
+    }
+
+    # Solo i comandi che servono al pannello. Tutto il resto (reset WiFi,
+    # restore, impostazioni di rete, relè diretti...) NON passa di qui.
+    location ~ ^/api/(status|time|melodies|weekly-schedules|special-events|test-melody|stop-melody|emergency-stop|toggle-bells|ntp-resync|backup)$ {
+        proxy_pass http://@ESP_HOST@;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "close";
+        proxy_set_header Host $host;
+        proxy_set_header Authorization "Basic @AUTH@";
+        proxy_connect_timeout 4s;
+        proxy_read_timeout 10s;
+        proxy_send_timeout 10s;
+
+        # micro-cache di 1 secondo sulle letture: l'ESP32 risponde 429 se
+        # lo interroghi piu' di ~6 volte al secondo (pannello + telefono).
+        proxy_cache campane;
+        proxy_cache_methods GET;
+        proxy_cache_valid 200 1s;
+        proxy_cache_lock on;
+        proxy_cache_use_stale error timeout updating;
+        add_header Cache-Control "no-store";
+    }
+
+    location /api/ { return 403; }
+    location / { return 404; }
+}
+
+# ------------------------------------------------------------------
+# 8081 - Web UI originale dell'ESP32 (completa), con password inserita
+#        dal proxy. Va esposta solo dietro Cloudflare Access.
+# ------------------------------------------------------------------
+server {
+    listen 127.0.0.1:8081;
+    server_name _;
+    client_max_body_size 1m;
+
+    location / {
+        proxy_pass http://@ESP_HOST@;
+        proxy_http_version 1.1;
+        proxy_set_header Connection "close";
+        proxy_set_header Host $host;
+        proxy_set_header Authorization "Basic @AUTH@";
+        proxy_connect_timeout 4s;
+        proxy_read_timeout 30s;
+        proxy_send_timeout 30s;
+    }
+}

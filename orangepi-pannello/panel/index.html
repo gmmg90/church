@@ -1,0 +1,586 @@
+<!doctype html>
+<html lang="it">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, user-scalable=no">
+<title>Campane</title>
+<style>
+:root{
+  --bg:#12100E; --rail:#1A1714; --card:#1C1916; --card2:#262220;
+  --line:#2E2923; --line2:#3A342D; --text:#F2EBDD; --muted:#B9B0A0;
+  --brass:#D9A84E; --brassdk:#1A1409; --green:#6FBF73; --red:#C8372D; --warn:#E0A53A;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--text);
+  font-family:"Barlow","Segoe UI",system-ui,-apple-system,Roboto,"Helvetica Neue",Arial,sans-serif;
+  overflow:hidden;user-select:none;-webkit-user-select:none;touch-action:manipulation}
+button{font:inherit;color:inherit;cursor:pointer;border:0;background:none}
+button:active{filter:brightness(1.25)}
+button:disabled{opacity:.45}
+.app{display:flex;height:100%;width:100%}
+/* barra laterale */
+nav{width:92px;flex:none;background:var(--rail);border-right:1px solid var(--line);
+  display:flex;flex-direction:column;gap:6px;padding:10px 8px}
+nav .logo{height:44px;display:flex;align-items:center;justify-content:center;color:var(--brass)}
+nav button.tab{height:64px;border-radius:12px;display:flex;flex-direction:column;align-items:center;
+  justify-content:center;gap:3px;font-size:13px;font-weight:600;color:#A89F8F}
+nav button.tab.on{background:#2E2616;color:var(--brass)}
+svg{display:block}
+.col{flex:1;min-width:0;display:flex;flex-direction:column}
+header{height:52px;flex:none;display:flex;align-items:center;justify-content:space-between;
+  padding:0 18px;border-bottom:1px solid var(--line)}
+header h1{margin:0;font-size:21px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:var(--brass)}
+.chips{display:flex;gap:14px;font-size:14px;color:var(--muted);align-items:center}
+.dot{display:inline-block;width:9px;height:9px;border-radius:50%;background:#6b6358;margin-right:6px}
+.dot.ok{background:var(--green)} .dot.bad{background:var(--red)} .dot.warn{background:var(--warn)}
+main{flex:1;min-height:0;padding:14px 18px 16px;display:flex;gap:14px;overflow:hidden}
+.view{display:none;flex:1;min-width:0;min-height:0}
+.view.on{display:flex}
+.banner{position:absolute;left:92px;right:0;top:52px;z-index:5;background:#3A1512;color:#FFD9D5;
+  border-bottom:1px solid #7A2A22;padding:8px 18px;font-size:15px;display:none}
+.banner.on{display:block}
+/* HOME */
+.left{width:290px;flex:none;display:flex;flex-direction:column;gap:12px}
+.clock{flex:1;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px 18px;
+  display:flex;flex-direction:column;justify-content:space-between}
+.clock .t{font-size:78px;font-weight:700;line-height:.95;letter-spacing:.01em;font-variant-numeric:tabular-nums}
+.clock .d{font-size:17px;color:var(--muted);margin-top:6px}
+.clock .next{border-top:1px solid var(--line);padding-top:12px}
+.clock .next small{font-size:12px;letter-spacing:.1em;text-transform:uppercase;color:#A89F8F;display:block}
+.clock .next b{font-size:24px;display:block;margin-top:2px}
+.clock .next span{font-size:14px;color:var(--muted)}
+.switch{height:64px;flex:none;border-radius:14px;padding:0 16px;display:flex;align-items:center;
+  justify-content:space-between;border:1px solid #2F5A31;background:#16241A;font-size:18px;font-weight:600;width:100%}
+.switch.off{border-color:#5A4A2C;background:#2A2112}
+.track{width:54px;height:30px;border-radius:999px;background:#4A4238;position:relative;flex:none}
+.track i{position:absolute;top:3px;left:3px;width:24px;height:24px;border-radius:50%;background:#D8D0C0;transition:left .12s}
+.track.on{background:var(--green)} .track.on i{left:27px;background:#10210F}
+.right{flex:1;min-width:0;display:flex;flex-direction:column;gap:12px}
+.playing{background:#2A2112;border:1px solid #6B5320;border-radius:12px;padding:10px 14px;
+  display:none;align-items:center;justify-content:space-between;font-size:16px;color:#F0D9A3}
+.playing.on{display:flex}
+.big{flex:1;border-radius:16px;display:flex;align-items:center;gap:18px;padding:0 22px;text-align:left;min-height:0}
+.big .ic{width:64px;height:64px;border-radius:50%;display:flex;align-items:center;justify-content:center;flex:none}
+.big b{display:block;font-size:34px;letter-spacing:.04em;line-height:1;font-weight:800}
+.big span.s{display:block;font-size:15px;margin-top:4px}
+.big.funeral{background:var(--card2);border:1px solid var(--line2)}
+.big.funeral .ic{background:#1A1714;border:1px solid var(--line2);color:var(--brass)}
+.big.funeral .s{color:var(--muted)}
+.big.messa{background:var(--brass);color:var(--brassdk)}
+.big.messa .ic{background:var(--brassdk);color:var(--brass)}
+.big.messa .s{color:#3F300E}
+.stop{height:64px;flex:none;background:var(--red);color:#fff;border-radius:14px;font-size:22px;font-weight:700;
+  letter-spacing:.04em;display:flex;align-items:center;justify-content:center;gap:12px}
+/* liste */
+.stack{flex:1;min-width:0;display:flex;flex-direction:column;gap:8px;min-height:0}
+.list{flex:1;min-height:0;overflow-y:auto;display:flex;flex-direction:column;gap:8px;-webkit-overflow-scrolling:touch}
+.row{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:0 14px;min-height:62px;flex:none;
+  display:flex;align-items:center;gap:14px}
+.row .tm{font-size:30px;font-weight:700;width:86px;font-variant-numeric:tabular-nums}
+.row .nm{flex:1;min-width:0}
+.row .nm b{display:block;font-size:18px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.row .nm span{font-size:14px;color:var(--muted)}
+.row .slot{font-size:30px;font-weight:700;color:var(--brass);width:34px;text-align:center}
+.btn{height:48px;padding:0 18px;border-radius:12px;background:var(--brass);color:var(--brassdk);font-size:17px;font-weight:700;
+  display:inline-flex;align-items:center;justify-content:center;gap:8px;text-decoration:none}
+.btn.ghost{background:var(--card2);color:var(--text);border:1px solid var(--line2)}
+.btn.danger{background:#3A1512;color:#FFD9D5;border:1px solid #7A2A22}
+.btn.sq{width:48px;padding:0}
+.seg{display:flex;gap:8px;flex:none}
+.seg button{padding:10px 18px;border-radius:999px;background:var(--card2);border:1px solid var(--line2);color:var(--muted);font-size:16px;font-weight:600}
+.seg button.on{background:var(--brass);color:var(--brassdk);border-color:var(--brass)}
+.empty{color:var(--muted);text-align:center;padding:30px;font-size:17px}
+/* sistema */
+.sys{flex:1;min-width:0;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:6px 16px;display:flex;flex-direction:column;overflow-y:auto}
+.sys div{flex:1;min-height:44px;display:flex;align-items:center;justify-content:space-between;border-bottom:1px solid #2A2520;font-size:17px}
+.sys div:last-child{border-bottom:0}
+.sys div span:first-child{color:var(--muted)}
+.side{width:210px;flex:none;display:flex;flex-direction:column;gap:10px}
+.side .btn{flex:1;flex-direction:column;height:auto;font-size:16px;background:var(--card2);color:var(--text);border:1px solid var(--line2)}
+/* modale */
+.modal{position:fixed;inset:0;background:rgba(0,0,0,.72);display:none;align-items:center;justify-content:center;z-index:20;padding:12px}
+.modal.on{display:flex}
+.sheet{background:#1E1B18;border:1px solid var(--line2);border-radius:18px;padding:20px;width:min(520px,100%);max-height:100%;overflow-y:auto}
+.sheet h2{margin:0 0 6px;font-size:26px}
+.sheet p{margin:0 0 16px;color:var(--muted);font-size:17px}
+.sheet .acts{display:flex;gap:10px;margin-top:16px}
+.sheet .acts .btn{flex:1;height:58px;font-size:19px}
+.days{display:grid;grid-template-columns:repeat(7,1fr);gap:6px;margin:10px 0}
+.days button{height:48px;border-radius:10px;background:var(--card2);border:1px solid var(--line2);font-weight:600;font-size:15px}
+.days button.on{background:var(--brass);color:var(--brassdk);border-color:var(--brass)}
+.time{display:flex;align-items:center;justify-content:center;gap:18px;margin:12px 0}
+.time .u{display:flex;flex-direction:column;align-items:center;gap:6px}
+.time .u b{font-size:54px;font-variant-numeric:tabular-nums;line-height:1}
+.time .u button{width:72px;height:44px;border-radius:10px;background:var(--card2);border:1px solid var(--line2);font-size:24px}
+.time .sep{font-size:44px;font-weight:700;padding-top:8px}
+.mel{display:flex;flex-wrap:wrap;gap:8px;margin-top:6px}
+.mel button{padding:12px 16px;border-radius:10px;background:var(--card2);border:1px solid var(--line2);font-size:16px;font-weight:600}
+.mel button.on{background:var(--brass);color:var(--brassdk);border-color:var(--brass)}
+.toast{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);background:#2E2616;color:#F0D9A3;border:1px solid #6B5320;
+  border-radius:12px;padding:12px 20px;font-size:17px;z-index:30;display:none;max-width:90%}
+.toast.on{display:block}
+.toast.err{background:#3A1512;color:#FFD9D5;border-color:#7A2A22}
+/* telefono in verticale */
+@media (max-width:640px){
+  html,body{overflow:auto}
+  .app{flex-direction:column-reverse;height:100dvh}
+  nav{width:100%;height:68px;flex-direction:row;border-right:0;border-top:1px solid var(--line);padding:6px;gap:4px}
+  nav .logo{display:none}
+  nav button.tab{flex:1;height:100%}
+  .banner{left:0}
+  header{padding:0 12px} .chips{gap:8px;font-size:12px}
+  main{padding:10px 12px;overflow-y:auto;flex-direction:column}
+  #v-home{flex-direction:column}
+  .left{width:100%} .clock{flex:none;gap:14px} .clock .t{font-size:64px}
+  .big{min-height:96px;flex:none} .big b{font-size:26px}
+  .sys{flex:none} .side{width:100%;flex-direction:row} .side .btn{height:84px}
+  #v-sistema{flex-direction:column}
+  .toast{bottom:84px}
+}
+</style>
+</head>
+<body>
+<div class="app">
+  <nav aria-label="Navigazione">
+    <div class="logo" aria-hidden="true">
+      <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v2"/><path d="M6 19h12"/><path d="M7 19c0-2 1-3 1-6a4 4 0 0 1 8 0c0 3 1 4 1 6"/><path d="M10.5 19.5a1.5 1.5 0 0 0 3 0"/></svg>
+    </div>
+    <button class="tab on" data-tab="home" aria-label="Home">
+      <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 11l8-7 8 7"/><path d="M6 10v9h12v-9"/></svg><span>Home</span></button>
+    <button class="tab" data-tab="melodie" aria-label="Melodie">
+      <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18V6l10-2v12"/><circle cx="6.5" cy="18" r="2.5"/><circle cx="16.5" cy="16" r="2.5"/></svg><span>Melodie</span></button>
+    <button class="tab" data-tab="orari" aria-label="Orari">
+      <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16M9 3v4M15 3v4"/></svg><span>Orari</span></button>
+    <button class="tab" data-tab="sistema" aria-label="Sistema">
+      <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1"/></svg><span>Sistema</span></button>
+  </nav>
+
+  <div class="col">
+    <header>
+      <h1 id="title">Controllo campane</h1>
+      <div class="chips">
+        <span><i class="dot" id="dEsp"></i><span id="tEsp">ESP32…</span></span>
+        <span><i class="dot ok"></i><span id="tAcc">Locale</span></span>
+        <span id="tTemp"></span>
+      </div>
+    </header>
+    <div class="banner" id="banner">ESP32 non raggiungibile. Riprovo di continuo; i comandi sono sospesi.</div>
+
+    <main>
+      <!-- HOME -->
+      <section class="view on" id="v-home">
+        <div class="left">
+          <div class="clock">
+            <div>
+              <div class="t" id="clkT">--:--</div>
+              <div class="d" id="clkD">&nbsp;</div>
+            </div>
+            <div class="next">
+              <small>Prossimo evento</small>
+              <b id="nextB">—</b>
+              <span id="nextS">&nbsp;</span>
+            </div>
+          </div>
+          <button class="switch" id="btnBells" aria-label="Attiva o disattiva le campane">
+            <span style="display:flex;align-items:center;gap:10px">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M7 19c0-2 1-3 1-6a4 4 0 0 1 8 0c0 3 1 4 1 6z"/><path d="M12 3v2"/></svg>
+              <span id="bellsTxt">Campane</span>
+            </span>
+            <span class="track" id="bellsTrack"><i></i></span>
+          </button>
+        </div>
+        <div class="right">
+          <div class="playing" id="playing"><span>In riproduzione: <b id="playName"></b></span><span style="color:var(--brass)">suonano le campane</span></div>
+          <button class="big funeral" id="btnFuneral">
+            <span class="ic"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M12 3v18M7 8h10"/></svg></span>
+            <span><b>FUNERALE</b><span class="s" id="subFuneral">melodia 0</span></span>
+          </button>
+          <button class="big messa" id="btnMessa">
+            <span class="ic"><svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M7 19c0-2 1-3 1-6a4 4 0 0 1 8 0c0 3 1 4 1 6z"/><path d="M12 3v2"/><path d="M4 9c.5-1.5 1.2-2.5 2-3M20 9c-.5-1.5-1.2-2.5-2-3"/></svg></span>
+            <span><b>CHIAMATA MESSA</b><span class="s" id="subMessa">melodia 1</span></span>
+          </button>
+          <button class="stop" id="btnStop">
+            <svg width="26" height="26" viewBox="0 0 24 24" fill="currentColor"><rect x="6" y="6" width="12" height="12" rx="2"/></svg>
+            STOP EMERGENZA
+          </button>
+        </div>
+      </section>
+
+      <!-- MELODIE -->
+      <section class="view" id="v-melodie">
+        <div class="stack">
+          <div class="list" id="melList"></div>
+          <div style="display:flex;gap:10px;flex:none">
+            <button class="btn danger" id="btnStop2" style="flex:1;height:54px">Ferma melodia</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- ORARI -->
+      <section class="view" id="v-orari">
+        <div class="stack">
+          <div class="seg">
+            <button class="on" id="segW">Settimanale</button>
+            <button id="segE">Eventi speciali</button>
+          </div>
+          <div class="list" id="schList"></div>
+          <button class="btn" id="btnAdd" style="height:52px;flex:none">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M12 5v14M5 12h14"/></svg>
+            Aggiungi orario
+          </button>
+        </div>
+      </section>
+
+      <!-- SISTEMA -->
+      <section class="view" id="v-sistema">
+        <div class="sys" id="sysList"></div>
+        <div class="side">
+          <a class="btn" href="/api/backup" download="backup-campane.json">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 4v10m0 0l-4-4m4 4l4-4M5 19h14"/></svg>Backup</a>
+          <button class="btn" id="btnNtp">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8"/><path d="M12 7v5l3 2"/></svg>Sincronizza ora</button>
+          <button class="btn" id="btnReload">
+            <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12a7 7 0 1 0 2.2-5.1"/><path d="M5 4v4h4"/></svg>Ricarica pannello</button>
+        </div>
+      </section>
+    </main>
+  </div>
+</div>
+
+<!-- modale conferma -->
+<div class="modal" id="mConfirm" role="dialog" aria-modal="true">
+  <div class="sheet">
+    <h2 id="cfT"></h2><p id="cfP"></p>
+    <div class="acts"><button class="btn ghost" id="cfNo">Annulla</button><button class="btn" id="cfYes">Conferma</button></div>
+  </div>
+</div>
+
+<!-- modale nuovo orario -->
+<div class="modal" id="mAdd" role="dialog" aria-modal="true">
+  <div class="sheet">
+    <h2>Nuovo orario</h2>
+    <p>Giorno, ora e melodia.</p>
+    <div class="days" id="addDays"></div>
+    <div class="time">
+      <div class="u"><button id="hUp" aria-label="Ora più">▲</button><b id="hVal">07</b><button id="hDn" aria-label="Ora meno">▼</button></div>
+      <div class="sep">:</div>
+      <div class="u"><button id="mUp" aria-label="Minuti più">▲</button><b id="mVal">00</b><button id="mDn" aria-label="Minuti meno">▼</button></div>
+    </div>
+    <div class="mel" id="addMel"></div>
+    <div class="acts"><button class="btn ghost" id="addNo">Annulla</button><button class="btn" id="addYes">Salva</button></div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+(function(){
+'use strict';
+var $ = function(id){return document.getElementById(id)};
+var DAYS = ['Domenica','Lunedì','Martedì','Mercoledì','Giovedì','Venerdì','Sabato'];
+var DAYS_S = ['Dom','Lun','Mar','Mer','Gio','Ven','Sab'];
+var MONTHS = ['gennaio','febbraio','marzo','aprile','maggio','giugno','luglio','agosto','settembre','ottobre','novembre','dicembre'];
+var S = {status:null, melodies:[], weekly:[], events:[], tab:'home', schedMode:'w', failCount:0, timeOffset:null, busy:false};
+
+/* ---------- rete ---------- */
+function api(path, opts){
+  opts = opts || {};
+  var ctl = new AbortController();
+  var to = setTimeout(function(){ctl.abort()}, 8000);
+  var init = {method: opts.method||'GET', signal: ctl.signal, cache:'no-store', headers:{}};
+  if(opts.body !== undefined){ init.body = JSON.stringify(opts.body); init.headers['Content-Type']='application/json'; }
+  return fetch(path, init).then(function(r){
+    clearTimeout(to);
+    return r.text().then(function(t){
+      var j = null; try{ j = JSON.parse(t) }catch(e){}
+      if(!r.ok){ var m = (j && j.message) || ('Errore ' + r.status); throw new Error(m); }
+      return j;
+    });
+  }, function(e){ clearTimeout(to); throw e; });
+}
+function toast(msg, err){
+  var t = $('toast'); t.textContent = msg; t.className = 'toast on' + (err?' err':'');
+  clearTimeout(toast._t); toast._t = setTimeout(function(){t.className='toast'}, 3200);
+}
+function pad(n){return (n<10?'0':'')+n}
+
+/* ---------- orologio ---------- */
+function syncTime(){
+  return api('/api/time').then(function(j){
+    if(j && j.year){
+      var espLocal = Date.UTC(j.year, j.month-1, j.day, j.hour, j.min, j.sec);
+      S.timeOffset = espLocal - Date.now();
+    }
+  }).catch(function(){});
+}
+function nowEsp(){
+  var d = S.timeOffset===null ? new Date(Date.now() - new Date().getTimezoneOffset()*60000) : new Date(Date.now()+S.timeOffset);
+  return d; /* usare getUTC* */
+}
+function tickClock(){
+  var d = nowEsp();
+  $('clkT').textContent = pad(d.getUTCHours()) + ':' + pad(d.getUTCMinutes());
+  $('clkD').textContent = DAYS[d.getUTCDay()].toLowerCase() + ' ' + d.getUTCDate() + ' ' + MONTHS[d.getUTCMonth()];
+  if(S._lastMin !== d.getUTCMinutes()){ S._lastMin = d.getUTCMinutes(); renderNext(); }
+}
+
+/* ---------- prossimo evento ---------- */
+function melName(i){
+  for(var k=0;k<S.melodies.length;k++){ if(S.melodies[k].index===i) return S.melodies[k].name; }
+  return 'Melodia ' + i;
+}
+function renderNext(){
+  var d = nowEsp();
+  var nowMin = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate(), d.getUTCHours(), d.getUTCMinutes())/60000;
+  var best = null;
+  S.weekly.forEach(function(e){
+    if(!e.isActive) return;
+    for(var add=0; add<8; add++){
+      var day = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()+add));
+      if(day.getUTCDay() !== e.dayOfWeek) continue;
+      var t = day.getTime()/60000 + e.hour*60 + e.minute;
+      if(t >= nowMin){ if(!best || t < best.t) best = {t:t, e:e}; break; }
+    }
+  });
+  S.events.forEach(function(e){
+    if(!e.isActive) return;
+    var y = e.isRecurring ? d.getUTCFullYear() : e.year;
+    for(var yy=y; yy<=y+(e.isRecurring?1:0); yy++){
+      var t = Date.UTC(yy, e.month-1, e.day)/60000 + e.hour*60 + e.minute;
+      if(t >= nowMin){ if(!best || t < best.t) best = {t:t, e:e}; break; }
+    }
+  });
+  if(!best){ $('nextB').textContent = 'Nessuno programmato'; $('nextS').innerHTML = '&nbsp;'; return; }
+  var diff = best.t - nowMin;
+  var hh = Math.floor((best.t % 1440)/60), mm = best.t % 60;
+  $('nextB').textContent = pad(hh) + ':' + pad(mm) + ' · ' + melName(best.e.melodyIndex);
+  var txt;
+  if(diff === 0) txt = 'adesso';
+  else if(diff < 60) txt = 'tra ' + diff + ' min';
+  else if(diff < 1440) txt = 'tra ' + Math.floor(diff/60) + ' h ' + (diff%60) + ' min';
+  else { var dd = new Date(best.t*60000); txt = DAYS[dd.getUTCDay()].toLowerCase() + ' ' + dd.getUTCDate() + ' ' + MONTHS[dd.getUTCMonth()]; }
+  $('nextS').textContent = txt;
+}
+
+/* ---------- stato ---------- */
+function pollStatus(){
+  return api('/api/status').then(function(st){
+    S.status = st; S.failCount = 0; renderStatus();
+  }).catch(function(){
+    S.failCount++; if(S.failCount >= 2) renderStatus();
+  });
+}
+function renderStatus(){
+  var st = S.status, down = S.failCount >= 2;
+  $('banner').className = 'banner' + (down ? ' on' : '');
+  $('dEsp').className = 'dot ' + (down ? 'bad' : (st ? 'ok' : ''));
+  $('tEsp').textContent = down ? 'ESP32 offline' : (st ? 'ESP32 online' : 'ESP32…');
+  $('tAcc').textContent = (location.hostname==='localhost'||location.hostname==='127.0.0.1') ? 'Locale' : 'Remoto';
+  if(!st) return;
+  $('tTemp').textContent = (st.esp32Temperature ? Math.round(st.esp32Temperature) + ' °C' : '');
+  var on = !!st.bellsEnabled;
+  $('bellsTxt').textContent = on ? 'Campane attive' : 'Campane disattivate';
+  $('bellsTrack').className = 'track' + (on?' on':'');
+  $('btnBells').className = 'switch' + (on?'':' off');
+  var p = $('playing');
+  if(st.isPlaying){ p.className='playing on'; $('playName').textContent = st.playingName || ''; }
+  else p.className = 'playing';
+  if(S.tab==='sistema') renderSystem();
+}
+function fmtUptime(ms){
+  var s = Math.floor(ms/1000), d = Math.floor(s/86400); s%=86400;
+  var h = Math.floor(s/3600); s%=3600; var m = Math.floor(s/60);
+  return (d? d+' g ':'') + h + ' h ' + m + ' min';
+}
+function renderSystem(){
+  var st = S.status; if(!st){ $('sysList').innerHTML=''; return; }
+  function row(k, v, cls){ return '<div><span>'+k+'</span><span><i class="dot '+(cls||'')+'"></i>'+v+'</span></div>'; }
+  var rows = [];
+  rows.push(row('Controller ESP32', 'Connesso', 'ok'));
+  rows.push(row('Rete Wi-Fi', st.wifiConnected ? ('Connesso' + (st.rssi? ' · '+st.rssi+' dBm':'')) : (st.apMode?'Modalità AP':'Non connesso'), st.wifiConnected?'ok':'bad'));
+  rows.push(row('Indirizzo ESP32', st.ipAddress || '—', ''));
+  rows.push(row('Orologio RTC', st.rtcConnected ? 'OK' : 'Non rilevato', st.rtcConnected?'ok':'warn'));
+  rows.push(row('Sincronizzazione NTP', st.ntpSynced ? 'Aggiornata' : 'Non sincronizzata', st.ntpSynced?'ok':'warn'));
+  rows.push(row('Temperatura', st.esp32Temperature ? Math.round(st.esp32Temperature)+' °C' : '—', st.thermalProtection?'bad':(st.temperatureWarning?'warn':'ok')));
+  rows.push(row('Programmazione', st.schedulerActive ? 'Attiva' : 'Ferma', st.schedulerActive?'ok':'warn'));
+  rows.push(row('In funzione da', fmtUptime(st.uptimeMs||0), ''));
+  rows.push(row('Firmware', st.firmwareVersion || '—', ''));
+  $('sysList').innerHTML = rows.join('');
+}
+
+/* ---------- melodie ---------- */
+function loadMelodies(){
+  return api('/api/melodies').then(function(j){
+    S.melodies = (j && j.melodies) || [];
+    var f = S.melodies.filter(function(m){return m.index===0})[0], m1 = S.melodies.filter(function(m){return m.index===1})[0];
+    $('subFuneral').textContent = f ? (f.noteCount + ' colpi · ' + Math.round(f.duration/1000) + ' s') : 'melodia 0 non trovata';
+    $('subMessa').textContent = m1 ? (m1.noteCount + ' colpi · ' + Math.round(m1.duration/1000) + ' s') : 'melodia 1 non trovata';
+    renderMelodies(); renderNext();
+  }).catch(function(){});
+}
+function renderMelodies(){
+  var el = $('melList');
+  if(!S.melodies.length){ el.innerHTML = '<div class="empty">Nessuna melodia caricata.</div>'; return; }
+  el.innerHTML = '';
+  S.melodies.forEach(function(m){
+    var r = document.createElement('div'); r.className = 'row'; r.style.minHeight = '74px';
+    r.innerHTML = '<div class="slot">'+m.index+'</div><div class="nm"><b></b><span>'+m.noteCount+' colpi · '+Math.round(m.duration/1000)+' s</span></div>';
+    r.querySelector('b').textContent = m.name;
+    var b = document.createElement('button'); b.className = 'btn'; b.innerHTML = '<svg width="22" height="22" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"/></svg>Prova';
+    b.onclick = function(){ askPlay(m.index, m.name); };
+    r.appendChild(b); el.appendChild(r);
+  });
+}
+
+/* ---------- comandi ---------- */
+function confirmBox(title, text, yesLabel){
+  return new Promise(function(res){
+    $('cfT').textContent = title; $('cfP').textContent = text; $('cfYes').textContent = yesLabel || 'Conferma';
+    $('mConfirm').className = 'modal on';
+    function done(v){ $('mConfirm').className='modal'; $('cfYes').onclick=null; $('cfNo').onclick=null; res(v); }
+    $('cfYes').onclick = function(){done(true)}; $('cfNo').onclick = function(){done(false)};
+  });
+}
+function askPlay(idx, name){
+  if(S.status && !S.status.bellsEnabled){
+    toast('Le campane sono disattivate. Attivale prima.', true); return;
+  }
+  confirmBox('Avviare ' + name + '?', 'Le campane suoneranno subito.', 'Avvia').then(function(ok){
+    if(!ok) return;
+    api('/api/test-melody', {method:'POST', body:{melodyId: idx}}).then(function(){
+      toast(name + ' avviata'); setTimeout(pollStatus, 500);
+    }).catch(function(e){ toast(e.message || 'Errore', true); });
+  });
+}
+function stopAll(){
+  api('/api/emergency-stop', {method:'POST'}).then(function(){
+    toast('STOP eseguito'); setTimeout(pollStatus, 400);
+  }).catch(function(e){ toast('STOP non riuscito: ' + (e.message||'errore'), true); });
+}
+function toggleBells(){
+  if(!S.status) return;
+  var want = !S.status.bellsEnabled;
+  api('/api/toggle-bells', {method:'POST', body:{enabled: want}}).then(function(){
+    S.status.bellsEnabled = want; renderStatus(); toast(want ? 'Campane attivate' : 'Campane disattivate');
+    setTimeout(pollStatus, 600);
+  }).catch(function(e){ toast(e.message||'Errore', true); });
+}
+
+/* ---------- orari ---------- */
+function loadSchedules(){
+  return Promise.all([api('/api/weekly-schedules'), api('/api/special-events')]).then(function(r){
+    S.weekly = (r[0] && r[0].schedules) || [];
+    S.events = (r[1] && r[1].events) || [];
+    renderSchedules(); renderNext();
+  }).catch(function(){});
+}
+function saveWeekly(list){
+  return api('/api/weekly-schedules', {method:'POST', body:{schedules: list}}).then(function(){ S.weekly = list; renderSchedules(); renderNext(); });
+}
+function saveEvents(list){
+  return api('/api/special-events', {method:'POST', body:{events: list}}).then(function(){ S.events = list; renderSchedules(); renderNext(); });
+}
+function renderSchedules(){
+  var el = $('schList'); el.innerHTML = '';
+  $('segW').className = S.schedMode==='w' ? 'on' : ''; $('segE').className = S.schedMode==='e' ? 'on' : '';
+  $('btnAdd').style.display = S.schedMode==='w' ? 'flex' : 'none';
+  var items = S.schedMode==='w' ? S.weekly.slice() : S.events.slice();
+  if(S.schedMode==='w') items.sort(function(a,b){ return ((a.dayOfWeek+6)%7)*1440 + a.hour*60 + a.minute - (((b.dayOfWeek+6)%7)*1440 + b.hour*60 + b.minute); });
+  else items.sort(function(a,b){ return (a.year*372+a.month*31+a.day)*1440 + a.hour*60 + a.minute - ((b.year*372+b.month*31+b.day)*1440 + b.hour*60 + b.minute); });
+  if(!items.length){ el.innerHTML = '<div class="empty">' + (S.schedMode==='w' ? 'Nessun orario settimanale.' : 'Nessun evento speciale.') + '</div>'; return; }
+  items.forEach(function(e){
+    var r = document.createElement('div'); r.className = 'row';
+    var sub = S.schedMode==='w' ? DAYS[e.dayOfWeek] : (e.day + ' ' + MONTHS[e.month-1] + (e.isRecurring ? ' · ogni anno' : ' ' + e.year));
+    r.innerHTML = '<div class="tm">'+pad(e.hour)+':'+pad(e.minute)+'</div><div class="nm"><b></b><span></span></div>';
+    r.querySelector('b').textContent = (e.name ? e.name + ' · ' : '') + melName(e.melodyIndex);
+    r.querySelector('span').textContent = sub;
+    var tg = document.createElement('button'); tg.className = 'track' + (e.isActive?' on':''); tg.innerHTML = '<i></i>';
+    tg.setAttribute('aria-label', 'Attiva o disattiva ' + pad(e.hour)+':'+pad(e.minute));
+    tg.onclick = function(){
+      var list = (S.schedMode==='w' ? S.weekly : S.events).map(function(x){ return x===e ? Object.assign({}, x, {isActive: !x.isActive}) : x; });
+      (S.schedMode==='w' ? saveWeekly(list) : saveEvents(list)).catch(function(er){ toast(er.message||'Errore', true); });
+    };
+    var del = document.createElement('button'); del.className = 'btn danger sq'; del.setAttribute('aria-label','Elimina');
+    del.innerHTML = '<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 7h14M10 7V4h4v3M7 7l1 13h8l1-13"/></svg>';
+    del.onclick = function(){
+      confirmBox('Eliminare questo orario?', pad(e.hour)+':'+pad(e.minute)+' · '+sub, 'Elimina').then(function(ok){
+        if(!ok) return;
+        var list = (S.schedMode==='w' ? S.weekly : S.events).filter(function(x){return x!==e});
+        (S.schedMode==='w' ? saveWeekly(list) : saveEvents(list)).then(function(){toast('Orario eliminato')}).catch(function(er){ toast(er.message||'Errore', true); });
+      });
+    };
+    r.appendChild(tg); r.appendChild(del); el.appendChild(r);
+  });
+}
+
+/* nuovo orario */
+var ADD = {day:1, h:7, m:0, mel:1};
+function openAdd(){
+  var box = $('addDays'); box.innerHTML = '';
+  [1,2,3,4,5,6,0].forEach(function(d){
+    var b = document.createElement('button'); b.textContent = DAYS_S[d]; b.className = (ADD.day===d?'on':'');
+    b.onclick = function(){ ADD.day = d; openAddDays(); };
+    box.appendChild(b);
+  });
+  var mb = $('addMel'); mb.innerHTML = '';
+  S.melodies.forEach(function(m){
+    var b = document.createElement('button'); b.textContent = m.name; b.className = (ADD.mel===m.index?'on':'');
+    b.onclick = function(){ ADD.mel = m.index; Array.prototype.forEach.call(mb.children, function(c){c.className=''}); b.className='on'; };
+    mb.appendChild(b);
+  });
+  $('hVal').textContent = pad(ADD.h); $('mVal').textContent = pad(ADD.m);
+  $('mAdd').className = 'modal on';
+}
+function openAddDays(){
+  Array.prototype.forEach.call($('addDays').children, function(b, i){ b.className = ([1,2,3,4,5,6,0][i]===ADD.day) ? 'on' : ''; });
+}
+function bump(key, delta, mod){ ADD[key] = (ADD[key] + delta + mod) % mod; $('hVal').textContent = pad(ADD.h); $('mVal').textContent = pad(ADD.m); }
+
+/* ---------- navigazione ---------- */
+var TITLES = {home:'Controllo campane', melodie:'Melodie', orari:'Programmazione', sistema:'Sistema'};
+function showTab(t){
+  S.tab = t; $('title').textContent = TITLES[t];
+  ['home','melodie','orari','sistema'].forEach(function(n){ $('v-'+n).className = 'view' + (n===t?' on':''); });
+  Array.prototype.forEach.call(document.querySelectorAll('nav .tab'), function(b){ b.className = 'tab' + (b.getAttribute('data-tab')===t?' on':''); });
+  if(t==='melodie') loadMelodies();
+  if(t==='orari') loadSchedules();
+  if(t==='sistema') { renderSystem(); pollStatus(); }
+}
+
+/* ---------- eventi ---------- */
+Array.prototype.forEach.call(document.querySelectorAll('nav .tab'), function(b){ b.onclick = function(){ showTab(b.getAttribute('data-tab')); }; });
+$('btnBells').onclick = toggleBells;
+$('btnFuneral').onclick = function(){ askPlay(0, 'FUNERALE'); };
+$('btnMessa').onclick = function(){ askPlay(1, 'CHIAMATA MESSA'); };
+$('btnStop').onclick = stopAll;
+$('btnStop2').onclick = stopAll;
+$('segW').onclick = function(){ S.schedMode='w'; renderSchedules(); };
+$('segE').onclick = function(){ S.schedMode='e'; renderSchedules(); };
+$('btnAdd').onclick = openAdd;
+$('addNo').onclick = function(){ $('mAdd').className='modal'; };
+$('hUp').onclick = function(){ bump('h',1,24) }; $('hDn').onclick = function(){ bump('h',-1,24) };
+$('mUp').onclick = function(){ bump('m',5,60) }; $('mDn').onclick = function(){ bump('m',-5,60) };
+$('addYes').onclick = function(){
+  var maxId = 0; S.weekly.forEach(function(e){ if(e.id>maxId) maxId=e.id; });
+  var item = {id: maxId+1, name: '', dayOfWeek: ADD.day, hour: ADD.h, minute: ADD.m, melodyIndex: ADD.mel, isActive: true};
+  saveWeekly(S.weekly.concat([item])).then(function(){ $('mAdd').className='modal'; toast('Orario aggiunto'); })
+    .catch(function(e){ toast(e.message||'Errore', true); });
+};
+$('btnNtp').onclick = function(){
+  api('/api/ntp-resync', {method:'POST'}).then(function(){ toast('Ora sincronizzata'); syncTime(); pollStatus(); })
+    .catch(function(e){ toast(e.message||'Sincronizzazione non riuscita', true); });
+};
+$('btnReload').onclick = function(){ location.reload(); };
+
+/* ---------- avvio ---------- */
+syncTime().then(tickClock);
+loadMelodies(); loadSchedules(); pollStatus();
+setInterval(tickClock, 1000);
+setInterval(pollStatus, 4000);
+setInterval(syncTime, 5*60*1000);
+setInterval(function(){ if(S.tab==='home'){ loadSchedules(); } }, 5*60*1000);
+tickClock();
+})();
+</script>
+</body>
+</html>

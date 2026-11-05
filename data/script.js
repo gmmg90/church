@@ -19,6 +19,28 @@ document.addEventListener('DOMContentLoaded', function() {
     refreshRelayStatus(); // Carica stato relè
     updateTime();
     
+    // === EVENT LISTENERS CONFIGURAZIONE RETE ===
+    // Checkbox DHCP
+    const dhcpCheckbox = document.getElementById('useDHCP');
+    if (dhcpCheckbox) {
+        dhcpCheckbox.addEventListener('change', toggleStaticIPSection);
+    }
+    
+    // Pulsante salva configurazione rete
+    const saveNetworkBtn = document.getElementById('saveNetworkBtn');
+    if (saveNetworkBtn) {
+        saveNetworkBtn.addEventListener('click', saveNetworkConfig);
+    }
+    
+    // Pulsante carica configurazione rete
+    const loadNetworkBtn = document.getElementById('loadNetworkBtn');
+    if (loadNetworkBtn) {
+        loadNetworkBtn.addEventListener('click', loadNetworkConfig);
+    }
+    
+    // Carica configurazione rete all'avvio
+    loadNetworkConfig();
+    
     // Aggiorna ogni secondo
     setInterval(updateTime, 1000);
     setInterval(loadSystemStatus, 5000);
@@ -1218,6 +1240,7 @@ function backupData() {
         });
 }
 
+
 function resetAllData() {
     if (confirm('ATTENZIONE: Questo cancellerà tutti i dati! Sei sicuro?')) {
         if (confirm('Questa operazione è irreversibile. Confermi?')) {
@@ -1231,4 +1254,147 @@ function resetAllData() {
             });
         }
     }
+}
+
+// === FUNZIONI CONFIGURAZIONE RETE (IP STATICO) ===
+
+// Validazione indirizzo IP
+function isValidIP(ip) {
+    if (!ip || ip.trim() === '') return false;
+    const parts = ip.split('.');
+    if (parts.length !== 4) return false;
+    return parts.every(part => {
+        const num = parseInt(part, 10);
+        return num >= 0 && num <= 255 && part === num.toString();
+    });
+}
+
+// Carica configurazione di rete
+function loadNetworkConfig() {
+    console.log('[Network] Caricamento configurazione rete...');
+    
+    // Verifica che gli elementi esistano
+    if (!document.getElementById('useDHCP')) {
+        console.log('[Network] Elementi HTML non ancora disponibili, skip');
+        return;
+    }
+    
+    fetch('/api/network-config')
+        .then(response => {
+            console.log('[Network] Risposta ricevuta:', response.status);
+            return response.json();
+        })
+        .then(data => {
+            console.log('[Network] Dati ricevuti:', data);
+            
+            const dhcpCheckbox = document.getElementById('useDHCP');
+            const staticIPInput = document.getElementById('staticIP');
+            const gatewayInput = document.getElementById('gateway');
+            const subnetInput = document.getElementById('subnet');
+            const dns1Input = document.getElementById('dns1');
+            const dns2Input = document.getElementById('dns2');
+            
+            if (dhcpCheckbox) dhcpCheckbox.checked = data.dhcp;
+            if (staticIPInput) staticIPInput.value = data.static_ip || '';
+            if (gatewayInput) gatewayInput.value = data.gateway || '';
+            if (subnetInput) subnetInput.value = data.subnet || '';
+            if (dns1Input) dns1Input.value = data.dns1 || '';
+            if (dns2Input) dns2Input.value = data.dns2 || '';
+            
+            // Mostra/nascondi sezione IP statico
+            toggleStaticIPSection();
+            
+            // Mostra info corrente
+            if (data.current_ip) {
+                const currentIPEl = document.getElementById('currentIP');
+                const currentGatewayEl = document.getElementById('currentGateway');
+                const currentSubnetEl = document.getElementById('currentSubnet');
+                const currentDNSEl = document.getElementById('currentDNS');
+                const networkInfoEl = document.getElementById('networkInfo');
+                
+                if (currentIPEl) currentIPEl.textContent = data.current_ip;
+                if (currentGatewayEl) currentGatewayEl.textContent = data.current_gateway || 'N/A';
+                if (currentSubnetEl) currentSubnetEl.textContent = data.current_subnet || 'N/A';
+                if (currentDNSEl) currentDNSEl.textContent = data.current_dns || 'N/A';
+                if (networkInfoEl) networkInfoEl.style.display = 'block';
+            }
+            
+            console.log('[Network] Configurazione caricata con successo');
+            showNotification('✅ Configurazione di rete caricata', 'success');
+        })
+        .catch(error => {
+            console.error('[Network] Errore caricamento configurazione rete:', error);
+            showNotification('❌ Errore caricamento configurazione', 'error');
+        });
+}
+
+// Salva configurazione di rete
+function saveNetworkConfig() {
+    console.log('[Network] Salvataggio configurazione rete...');
+    const useDHCP = document.getElementById('useDHCP').checked;
+    
+    let config = {
+        dhcp: useDHCP
+    };
+    
+    console.log('[Network] Modalità DHCP:', useDHCP);
+    
+    if (!useDHCP) {
+        const staticIP = document.getElementById('staticIP').value;
+        const gateway = document.getElementById('gateway').value;
+        const subnet = document.getElementById('subnet').value;
+        const dns1 = document.getElementById('dns1').value;
+        const dns2 = document.getElementById('dns2').value;
+        
+        console.log('[Network] IP Statico:', staticIP, gateway, subnet, dns1, dns2);
+        
+        // Validazione
+        if (!isValidIP(staticIP) || !isValidIP(gateway) || !isValidIP(subnet) || 
+            !isValidIP(dns1) || !isValidIP(dns2)) {
+            console.error('[Network] Validazione IP fallita');
+            showNotification('❌ Uno o più indirizzi IP non sono validi', 'error');
+            return;
+        }
+        
+        config.static_ip = staticIP;
+        config.gateway = gateway;
+        config.subnet = subnet;
+        config.dns1 = dns1;
+        config.dns2 = dns2;
+    }
+    
+    console.log('[Network] Configurazione da salvare:', config);
+    showNotification('🔄 Salvataggio configurazione...', 'info');
+    
+    fetch('/api/network-config', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(config)
+    })
+    .then(response => {
+        console.log('[Network] Risposta server:', response.status);
+        return response.json();
+    })
+    .then(data => {
+        console.log('[Network] Risultato salvataggio:', data);
+        if (data.success) {
+            showNotification('✅ ' + data.message, 'success');
+            showNotification('⚠️ Riavviare il sistema per applicare le modifiche', 'warning');
+        } else {
+            showNotification('❌ Errore: ' + (data.error || 'Errore sconosciuto'), 'error');
+        }
+    })
+    .catch(error => {
+        console.error('[Network] Errore salvataggio configurazione rete:', error);
+        showNotification('❌ Errore di comunicazione', 'error');
+    });
+}
+
+// Toggle visibilità sezione IP statico
+function toggleStaticIPSection() {
+    const useDHCP = document.getElementById('useDHCP').checked;
+    const staticSection = document.getElementById('staticIPSection');
+    staticSection.style.display = useDHCP ? 'none' : 'block';
 }

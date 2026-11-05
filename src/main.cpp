@@ -12,6 +12,13 @@
 // Include dei nostri file
 #include "include/config.h"
 #include "include/bell_controller.h"
+#include "include/validators.h"
+#include "include/wifi_manager.h"
+#include "include/watchdog_manager.h"
+#include "include/recovery_manager.h"  // v2.3.8: Sistema recovery
+#include "include/telegram_bot.h"      // v2.3.9: Bot Telegram
+#include "include/command_handler.h"   // v2.3.10: Unificazione Telegram + HTTP
+#include "include/web_assets.h"        // Pagine web compresse (generato da tools/embed_web.py)
 
 // Pin I2C di default per ESP32 (T-Display): SDA=21, SCL=22, sovrascrivibili da config.h
 #ifndef I2C_SDA_PIN
@@ -28,6 +35,12 @@ SystemStatus systemStatus;
 
 // Bell Controller (dichiarato in bell_controller.cpp)
 extern BellController bellController;
+
+// === MANAGER INSTANCES (v2.3.5+) ===
+WiFiReconnectManager wifiManager;
+WatchdogManager wdManager;
+RecoveryManager recoveryManager;  // v2.3.8: Sistema recovery multilivello
+TelegramBotManager telegramBot;   // v2.3.9: Bot Telegram
 
 // Variabili per ora manuale se RTC non presente
 DateTime manualTime;
@@ -63,21 +76,25 @@ TFT_eSPI tft = TFT_eSPI();
 RTC_DS3231 rtc;
 
 // Variabili di sistema
-bool bellsEnabled = false;
 bool testMode = false;
 bool schedulerActive = false;
-
-// Versione firmware
-static const char* FIRMWARE_VERSION = "v2.2";
-
-// Pulsante funerale - polarità (GPIO27 con pullup -> premuto = LOW)
-static bool FUNERAL_PRESSED_LOW = true; // Pulsante con pullup: LOW = premuto
 
 // Timing variables
 unsigned long lastUpdate = 0;
 unsigned long lastNTPCheck = 0;
 unsigned long lastScheduleCheck = 0;
 int lastCheckedMinute = -1;
+unsigned long lastWiFiCheck = 0;
+unsigned long lastNTPSync = 0;
+
+// Cache per risposte API (ottimizzazione prestazioni)
+String cachedStatusJson = "";
+String cachedTimeJson = "";
+String cachedRelayStatusJson = "";
+unsigned long lastStatusCache = 0;
+unsigned long lastTimeCache = 0;
+unsigned long lastRelayStatusCache = 0;
+const unsigned long CACHE_DURATION_MS = 1000; // 1 secondo TTL
 
 // Variabili monitoraggio temperatura ESP32
 float currentESP32Temperature = 0.0;
@@ -91,11 +108,30 @@ static int weeklyCount = 0;
 static SpecialEvent specialArr[MAX_SPECIAL_EVENTS];
 static int specialCount = 0;
 
-// FS paths
-static const char* WEEKLY_FS = "/weekly.json";
-static const char* SPECIAL_FS = "/events.json";
-static const char* MELODIES_FS = "/melodies.json";
- 
+// FS paths - now using Config::FileSystem constants
+static const char* SCHEDULES_FS = Config::FileSystem::SCHEDULES_FILE;
+static const char* MELODIES_FS = Config::FileSystem::MELODIES_FILE;
+static const char* MAINTENANCE_FS = Config::FileSystem::MAINTENANCE_FILE;
+
+static const uint8_t AUTO_MAINTENANCE_HOURS[] = {0, 4, 8, 12, 16, 20};
+static constexpr uint8_t AUTO_MAINTENANCE_MINUTE = 10;
+static constexpr unsigned long AUTO_MAINTENANCE_RESTART_DELAY_MS = 5000;
+String lastAutoMaintenanceSlot = "";
+bool autoMaintenanceRestartPending = false;
+unsigned long autoMaintenanceRestartAt = 0;
+
+// Struttura configurazione di rete
+struct NetworkConfig {
+  bool useDHCP;
+  IPAddress staticIP;
+  IPAddress gateway;
+  IPAddress subnet;
+  IPAddress dns1;
+  IPAddress dns2;
+};
+
+// Configurazione di rete corrente
+NetworkConfig networkConfig;
 
 // === DICHIARAZIONI DI FUNZIONE ===
 void updateDisplay();
@@ -106,6 +142,12 @@ void initSNTP(bool waitForSync);
 bool loadSchedulesFromFS();
 bool saveSchedulesToFS();
 void checkAndRunSchedules();
+bool saveTelegramUsersToFS();
+bool loadTelegramUsersFromFS();
+bool saveAutoMaintenanceStateToFS();
+bool loadAutoMaintenanceStateFromFS();
+void checkAutoTelegramMaintenance();
+String buildAutoMaintenanceReport(const struct tm &timeInfo);
 bool getLocalTm(struct tm &out);
 // Forward declarations for functions used before their definitions
 void connectWiFi();
@@ -117,6 +159,14 @@ void startApConfig();
 float getESP32Temperature();
 void checkTemperatureThresholds();
 String getTemperatureStatus();
+
+// === FUNZIONI DIAGNOSTICA ===
+void printWiFiDiagnostics();
+void printNTPDiagnostics();
+
+inline bool isButtonPressedLevel(int rawLevel, bool activeLow) {
+  return activeLow ? (rawLevel == LOW) : (rawLevel == HIGH);
+}
 
 // === FUNZIONI DI UTILITY ===
 
@@ -236,31 +286,134 @@ bool getLocalTm(struct tm &out) {
     }
   }
   
-  // Ultimo fallback: ora fittizia per evitare crash
-  memset(&out, 0, sizeof(out));
-  out.tm_year = 125; // 2025
-  out.tm_mon = 8;    // settembre (0-based)
-  out.tm_mday = 22;
-  out.tm_hour = 12;
-  out.tm_min = 0;
-  out.tm_sec = 0;
-  out.tm_wday = 0;   // domenica
-  return true; // Restituisco sempre true per evitare errori continui
+  // Ultimo fallback: nessuna fonte disponibile, non simulare un'ora fittizia
+  // per evitare che le campane suonino su una programmazione errata.
+  return false;
+}
+
+// === FUNZIONI CONFIGURAZIONE DI RETE ===
+
+bool loadNetworkConfig() {
+  // Imposta valori di default (DHCP)
+  networkConfig.useDHCP = true;
+  networkConfig.staticIP = IPAddress(192, 168, 1, 100);
+  networkConfig.gateway = IPAddress(192, 168, 1, 1);
+  networkConfig.subnet = IPAddress(255, 255, 255, 0);
+  networkConfig.dns1 = IPAddress(8, 8, 8, 8);
+  networkConfig.dns2 = IPAddress(8, 8, 4, 4);
+  
+  if (!SPIFFS.exists(Config::FileSystem::NETWORK_FILE)) {
+    Serial.println("[NETWORK] File network.json non trovato, uso DHCP");
+    return true; // Default DHCP, ok
+  }
+  
+  fs::File file = SPIFFS.open(Config::FileSystem::NETWORK_FILE, "r");
+  if (!file) {
+    Serial.println("[NETWORK] Errore apertura network.json");
+    return false;
+  }
+  
+  DynamicJsonDocument doc(512);
+  DeserializationError error = deserializeJson(doc, file);
+  file.close();
+  
+  if (error) {
+    Serial.print("[NETWORK] Errore parsing JSON: ");
+    Serial.println(error.c_str());
+    return false;
+  }
+  
+  // Carica configurazione
+  networkConfig.useDHCP = doc["dhcp"] | true;
+  
+  if (!networkConfig.useDHCP) {
+    String ip = doc["static_ip"] | "192.168.1.100";
+    String gw = doc["gateway"] | "192.168.1.1";
+    String sn = doc["subnet"] | "255.255.255.0";
+    String d1 = doc["dns1"] | "8.8.8.8";
+    String d2 = doc["dns2"] | "8.8.4.4";
+    
+    if (!networkConfig.staticIP.fromString(ip) ||
+        !networkConfig.gateway.fromString(gw) ||
+        !networkConfig.subnet.fromString(sn) ||
+        !networkConfig.dns1.fromString(d1) ||
+        !networkConfig.dns2.fromString(d2)) {
+      Serial.println("[NETWORK] Errore parsing indirizzi IP, uso DHCP");
+      networkConfig.useDHCP = true;
+      return false;
+    }
+    
+    Serial.println("[NETWORK] Configurazione IP statico caricata:");
+    Serial.print("  IP: "); Serial.println(networkConfig.staticIP);
+    Serial.print("  Gateway: "); Serial.println(networkConfig.gateway);
+    Serial.print("  Subnet: "); Serial.println(networkConfig.subnet);
+    Serial.print("  DNS1: "); Serial.println(networkConfig.dns1);
+    Serial.print("  DNS2: "); Serial.println(networkConfig.dns2);
+  } else {
+    Serial.println("[NETWORK] Modalità DHCP attiva");
+  }
+  
+  return true;
+}
+
+bool saveNetworkConfig() {
+  DynamicJsonDocument doc(512);
+  
+  doc["dhcp"] = networkConfig.useDHCP;
+  doc["static_ip"] = networkConfig.staticIP.toString();
+  doc["gateway"] = networkConfig.gateway.toString();
+  doc["subnet"] = networkConfig.subnet.toString();
+  doc["dns1"] = networkConfig.dns1.toString();
+  doc["dns2"] = networkConfig.dns2.toString();
+  
+  fs::File file = SPIFFS.open(Config::FileSystem::NETWORK_FILE, "w");
+  if (!file) {
+    Serial.println("[NETWORK] Errore scrittura network.json");
+    return false;
+  }
+  
+  bool success = serializeJson(doc, file) > 0;
+  file.close();
+  
+  if (success) {
+    Serial.println("[NETWORK] Configurazione salvata su SPIFFS");
+  }
+  
+  return success;
 }
 
 bool saveSchedulesToFS() {
   DynamicJsonDocument doc(16384);
+
   JsonArray w = doc.createNestedArray("weekly");
-  for (int i=0;i<weeklyCount;i++){
+  for (int i = 0; i < weeklyCount; i++) {
     JsonObject o = w.createNestedObject();
-    o["id"]=weeklyArr[i].id; o["name"]=weeklyArr[i].name; o["dayOfWeek"]=weeklyArr[i].dayOfWeek; o["hour"]=weeklyArr[i].hour; o["minute"]=weeklyArr[i].minute; o["melodyIndex"]=weeklyArr[i].melodyIndex; o["isActive"]=weeklyArr[i].isActive;
+    o["id"]          = weeklyArr[i].id;
+    o["name"]        = weeklyArr[i].name;
+    o["dayOfWeek"]   = weeklyArr[i].dayOfWeek;
+    o["hour"]        = weeklyArr[i].hour;
+    o["minute"]      = weeklyArr[i].minute;
+    o["melodyIndex"] = weeklyArr[i].melodyIndex;
+    o["isActive"]    = weeklyArr[i].isActive;
   }
+
   JsonArray s = doc.createNestedArray("special");
-  for (int i=0;i<specialCount;i++){
+  for (int i = 0; i < specialCount; i++) {
     JsonObject o = s.createNestedObject();
-    o["id"]=specialArr[i].id; o["name"]=specialArr[i].name; o["type"]=specialArr[i].type; o["year"]=specialArr[i].year; o["month"]=specialArr[i].month; o["day"]=specialArr[i].day; o["hour"]=specialArr[i].hour; o["minute"]=specialArr[i].minute; o["melodyIndex"]=specialArr[i].melodyIndex; o["isActive"]=specialArr[i].isActive; o["isRecurring"]=specialArr[i].isRecurring;
+    o["id"]          = specialArr[i].id;
+    o["name"]        = specialArr[i].name;
+    o["type"]        = specialArr[i].type;
+    o["year"]        = specialArr[i].year;
+    o["month"]       = specialArr[i].month;
+    o["day"]         = specialArr[i].day;
+    o["hour"]        = specialArr[i].hour;
+    o["minute"]      = specialArr[i].minute;
+    o["melodyIndex"] = specialArr[i].melodyIndex;
+    o["isActive"]    = specialArr[i].isActive;
+    o["isRecurring"] = specialArr[i].isRecurring;
   }
-  fs::File f = SPIFFS.open(WEEKLY_FS, "w");
+
+  fs::File f = SPIFFS.open(SCHEDULES_FS, "w");
   if (!f) return false;
   bool ok = serializeJson(doc, f) > 0;
   f.close();
@@ -269,20 +422,35 @@ bool saveSchedulesToFS() {
 
 bool loadSchedulesFromFS() {
   weeklyCount = 0; specialCount = 0;
-  if (!SPIFFS.exists(WEEKLY_FS)) return true; // nothing to load
-  fs::File f = SPIFFS.open(WEEKLY_FS, "r");
+  if (!SPIFFS.exists(SCHEDULES_FS)) return true; // nothing to load
+  fs::File f = SPIFFS.open(SCHEDULES_FS, "r");
   if (!f) return false;
   DynamicJsonDocument doc(16384);
   DeserializationError err = deserializeJson(doc, f);
   f.close();
   if (err) return false;
+  
+  // Track next available ID for auto-generation
+  uint8_t nextWeeklyId = 1;
+  uint8_t nextSpecialId = 1;
+  bool needsSave = false;
+  
   if (doc.containsKey("weekly")){
     JsonArray w = doc["weekly"].as<JsonArray>();
     for (JsonObject o : w){
       if (weeklyCount>=MAX_WEEKLY_SCHEDULES) break;
       WeeklySchedule &it = weeklyArr[weeklyCount++];
       strlcpy(it.name, (o["name"] | ""), sizeof(it.name));
-      it.id = o["id"] | weeklyCount;
+      
+      // Generate ID if missing
+      if (o.containsKey("id")) {
+        it.id = o["id"];
+        if (it.id >= nextWeeklyId) nextWeeklyId = it.id + 1;
+      } else {
+        it.id = nextWeeklyId++;
+        needsSave = true;
+      }
+      
       it.dayOfWeek = (DayOfWeek)(int)(o["dayOfWeek"] | 0);
       it.hour = o["hour"] | 0; it.minute = o["minute"] | 0;
       it.melodyIndex = o["melodyIndex"] | 0; it.isActive = o["isActive"] | true;
@@ -294,14 +462,210 @@ bool loadSchedulesFromFS() {
       if (specialCount>=MAX_SPECIAL_EVENTS) break;
       SpecialEvent &it = specialArr[specialCount++];
       strlcpy(it.name, (o["name"] | ""), sizeof(it.name));
-      it.id = o["id"] | specialCount;
+      
+      // Generate ID if missing
+      if (o.containsKey("id")) {
+        it.id = o["id"];
+        if (it.id >= nextSpecialId) nextSpecialId = it.id + 1;
+      } else {
+        it.id = nextSpecialId++;
+        needsSave = true;
+      }
+      
       it.type = (EventType)(int)(o["type"] | 5);
       it.year = o["year"] | 0; it.month = o["month"] | 0; it.day = o["day"] | 0;
       it.hour = o["hour"] | 0; it.minute = o["minute"] | 0;
       it.melodyIndex = o["melodyIndex"] | 0; it.isActive = o["isActive"] | true; it.isRecurring = o["isRecurring"] | false;
     }
   }
+  
+  // Save back if we generated any IDs
+  if (needsSave) {
+    saveSchedulesToFS();
+  }
+  
   return true;
+}
+
+// === PERSISTENZA UTENTI TELEGRAM ===
+static const char* TELEGRAM_USERS_FS = Config::FileSystem::TELEGRAM_USERS_FILE;
+
+bool saveTelegramUsersToFS() {
+  String usersList = telegramBot.getAuthorizedUsers();
+  StaticJsonDocument<512> doc;
+  JsonArray arr = doc.createNestedArray("users");
+  if (usersList.length() > 0) {
+    int startIdx = 0;
+    int commaIdx = usersList.indexOf(',', startIdx);
+    while (commaIdx > 0) {
+      String uid = usersList.substring(startIdx, commaIdx);
+      uid.trim();
+      if (uid.length() > 0) arr.add(uid);
+      startIdx = commaIdx + 1;
+      commaIdx = usersList.indexOf(',', startIdx);
+    }
+    String uid = usersList.substring(startIdx);
+    uid.trim();
+    if (uid.length() > 0) arr.add(uid);
+  }
+  fs::File f = SPIFFS.open(TELEGRAM_USERS_FS, "w");
+  if (!f) return false;
+  bool ok = serializeJson(doc, f) > 0;
+  f.close();
+  Serial.printf("[Telegram] Utenti salvati su FS (%d)\n", (int)arr.size());
+  return ok;
+}
+
+bool loadTelegramUsersFromFS() {
+  if (!SPIFFS.exists(TELEGRAM_USERS_FS)) return true;
+  fs::File f = SPIFFS.open(TELEGRAM_USERS_FS, "r");
+  if (!f) return false;
+  StaticJsonDocument<512> doc;
+  DeserializationError err = deserializeJson(doc, f);
+  f.close();
+  if (err) return false;
+  if (doc.containsKey("users")) {
+    JsonArray arr = doc["users"].as<JsonArray>();
+    for (JsonVariant v : arr) {
+      String uid = v.as<String>();
+      uid.trim();
+      if (uid.length() > 0) telegramBot.addAuthorizedUser(uid);
+    }
+    Serial.printf("[Telegram] Utenti caricati da FS (%d)\n", (int)arr.size());
+  }
+  return true;
+}
+
+bool saveAutoMaintenanceStateToFS() {
+  StaticJsonDocument<128> doc;
+  doc["lastSlot"] = lastAutoMaintenanceSlot;
+
+  fs::File file = SPIFFS.open(MAINTENANCE_FS, "w");
+  if (!file) {
+    Serial.println("[Maintenance] Errore scrittura maintenance.json");
+    return false;
+  }
+
+  bool ok = serializeJson(doc, file) > 0;
+  file.close();
+  return ok;
+}
+
+bool loadAutoMaintenanceStateFromFS() {
+  if (!SPIFFS.exists(MAINTENANCE_FS)) {
+    return true;
+  }
+
+  fs::File file = SPIFFS.open(MAINTENANCE_FS, "r");
+  if (!file) {
+    Serial.println("[Maintenance] Errore apertura maintenance.json");
+    return false;
+  }
+
+  StaticJsonDocument<128> doc;
+  DeserializationError err = deserializeJson(doc, file);
+  file.close();
+  if (err) {
+    Serial.println("[Maintenance] JSON maintenance non valido");
+    return false;
+  }
+
+  lastAutoMaintenanceSlot = doc["lastSlot"] | "";
+  return true;
+}
+
+String buildAutoMaintenanceReport(const struct tm &timeInfo) {
+  char timestamp[24];
+  snprintf(timestamp, sizeof(timestamp), "%04d-%02d-%02d %02d:%02d:%02d",
+           timeInfo.tm_year + 1900,
+           timeInfo.tm_mon + 1,
+           timeInfo.tm_mday,
+           timeInfo.tm_hour,
+           timeInfo.tm_min,
+           timeInfo.tm_sec);
+
+  String report = "[Auto Maintenance]\n";
+  report += "Slot: ";
+  report += timestamp;
+  report += "\n";
+  report += "WiFi: ";
+  report += (wifiManager.isConnected() ? "OK" : "DOWN");
+  report += "\n";
+  if (wifiManager.isConnected()) {
+    report += "IP: ";
+    report += WiFi.localIP().toString();
+    report += "\n";
+  }
+  report += "Bells: ";
+  report += systemStatus.bellsEnabled ? "ENABLED" : "DISABLED";
+  report += "\n";
+  report += "NTP: ";
+  report += systemStatus.ntpSynced ? "SYNCED" : "NOT_SYNCED";
+  report += "\n";
+  report += "Temp: ";
+  report += String(currentESP32Temperature, 1);
+  report += "C\n";
+  report += "Uptime h: ";
+  report += String(millis() / 3600000.0, 2);
+  report += "\n";
+  report += "Telegram msgs/cmds: ";
+  report += String(telegramBot.getMessageCount());
+  report += "/";
+  report += String(telegramBot.getCommandCount());
+
+  String recentLogs = Logger::getRecentLogs(6);
+  if (recentLogs.length() > 0) {
+    report += "\n\nRecent logs:\n";
+    report += recentLogs;
+  }
+
+  report += "\n\nRestarting in 5s.";
+  return report;
+}
+
+void checkAutoTelegramMaintenance() {
+  if (!telegramBot.isEnabled() || autoMaintenanceRestartPending) {
+    return;
+  }
+
+  struct tm timeInfo;
+  if (!getLocalTm(timeInfo)) {
+    return;
+  }
+
+  bool matchingHour = false;
+  for (uint8_t hour : AUTO_MAINTENANCE_HOURS) {
+    if (timeInfo.tm_hour == hour) {
+      matchingHour = true;
+      break;
+    }
+  }
+
+  if (!matchingHour || timeInfo.tm_min != AUTO_MAINTENANCE_MINUTE) {
+    return;
+  }
+
+  char slotKey[18];
+  snprintf(slotKey, sizeof(slotKey), "%04d%02d%02d%02d%02d",
+           timeInfo.tm_year + 1900,
+           timeInfo.tm_mon + 1,
+           timeInfo.tm_mday,
+           timeInfo.tm_hour,
+           timeInfo.tm_min);
+
+  if (lastAutoMaintenanceSlot == slotKey) {
+    return;
+  }
+
+  lastAutoMaintenanceSlot = slotKey;
+  saveAutoMaintenanceStateToFS();
+
+  String report = buildAutoMaintenanceReport(timeInfo);
+  Serial.printf("[Maintenance] Slot automatico %s: invio report e riavvio pianificato\n", slotKey);
+  telegramBot.sendNotification(report);
+
+  autoMaintenanceRestartPending = true;
+  autoMaintenanceRestartAt = millis() + AUTO_MAINTENANCE_RESTART_DELAY_MS;
 }
 
 // === IMPLEMENTAZIONE FUNZIONI TEMPERATURA ESP32 ===
@@ -421,6 +785,14 @@ void scanI2CDevices() {
 
 // === ARDUINO SETUP/LOOP ===
 void setup() {
+  // Relè spenti subito: fino a qui i pin sono flottanti
+  digitalWrite(RELAY1_PIN, RELAY_OFF);
+  digitalWrite(RELAY2_PIN, RELAY_OFF);
+  pinMode(RELAY1_PIN, OUTPUT);
+  pinMode(RELAY2_PIN, OUTPUT);
+  digitalWrite(MASTER_RELAY_PIN, Hardware::MASTER_OFF);
+  pinMode(MASTER_RELAY_PIN, Hardware::MASTER_PIN_MODE);
+
   Serial.begin(115200);
   delay(200);
   Serial.println("\n=== Avvio Campane Chiesa ===");
@@ -451,18 +823,41 @@ void setup() {
   // Bell controller
   bellController.begin();
 
+  // === INIZIALIZZA MANAGER (v2.3.5+) ===
+  Serial.printf("[Setup] Firmware versione: %s\n", Config::FIRMWARE_VERSION);
+  Serial.println("[Setup] Inizializzazione manager...");
+  
+  // WiFi Manager - configurato dopo connessione WiFi
+  wifiManager.setCredentials(WIFI_SSID, WIFI_PASSWORD);
+  Serial.println("[Setup] ✓ WiFiReconnectManager configurato");
+  
+  // Watchdog Manager - già attivo (auto-feed)
+  Serial.println("[Setup] ✓ WatchdogManager attivo");
+  
+  // Recovery Manager - v2.3.8
+  recoveryManager.begin();
+  Serial.println("[Setup] ✓ RecoveryManager inizializzato (BOOT=10s factory reset)");
+
   // Pulsante fisico per avvio "FUNERALE" (GPIO27 - pulsante esterno)
   pinMode(FUNERAL_BUTTON_PIN, INPUT_PULLUP); // Usa pullup interno
 
   // Pulsante fisico per avvio "CHIAMATA MESSA" (GPIO32 - pulsante esterno)
   pinMode(MASS_BUTTON_PIN, INPUT_PULLUP); // Usa pullup interno
+  pinMode(RESET_BUTTON_PIN, INPUT_PULLUP); // Pulsante riavvio manuale (GPIO13)
 
   // Pulsante di configurazione (GPIO0 - boot button)
   pinMode(CONFIG_BUTTON_PIN, INPUT_PULLUP);
 
-  // Carica melodie e schedules da FS
+  Serial.printf("[Buttons] Config pin=%d activeLow=%s\n", CONFIG_BUTTON_PIN, Hardware::CONFIG_BUTTON_ACTIVE_LOW ? "true" : "false");
+  Serial.printf("[Buttons] Funeral pin=%d activeLow=%s\n", FUNERAL_BUTTON_PIN, Hardware::FUNERAL_BUTTON_ACTIVE_LOW ? "true" : "false");
+  Serial.printf("[Buttons] Mass pin=%d activeLow=%s\n", MASS_BUTTON_PIN, Hardware::MASS_BUTTON_ACTIVE_LOW ? "true" : "false");
+  Serial.printf("[Buttons] Reset pin=%d activeLow=%s\n", RESET_BUTTON_PIN, Hardware::RESET_BUTTON_ACTIVE_LOW ? "true" : "false");
+
+  // Carica melodie, schedules e utenti Telegram da FS
   loadMelodiesFromFS();
   loadSchedulesFromFS();
+  loadTelegramUsersFromFS();
+  loadAutoMaintenanceStateFromFS();
 
   // Assicura che le due melodie predefinite esistano
   if (bellController.getMelodyNoteCount(0) == 0) {
@@ -483,13 +878,121 @@ void setup() {
   server.begin();
   Serial.println("Web server avviato");
 
+  // === COMMAND HANDLER SETUP (v2.3.10) - Unificazione Telegram + HTTP ===
+  CommandHandler& cmdHandler = CommandHandler::getInstance();
+  cmdHandler.init(&bellController, &systemStatus);
+  Serial.println("[CommandHandler] ✓ Inizializzato (unificazione API)");
+
+  // === TELEGRAM BOT SETUP (v2.3.9) ===
+  if (strlen(TELEGRAM_BOT_TOKEN) > 0 && strcmp(TELEGRAM_BOT_TOKEN, "123456789:ABCdefGHIjklMNOpqrsTUVwxyz") != 0) {
+    Serial.println("[Telegram] Inizializzazione bot...");
+    if (telegramBot.begin(TELEGRAM_BOT_TOKEN)) {
+      Serial.println("[Telegram] ✓ Bot inizializzato con successo");
+      
+      // Collega bot al bell controller e system status
+      telegramBot.setBellController(&bellController);
+      telegramBot.setSystemStatus(&systemStatus);
+      
+      // Carica utenti autorizzati dalla configurazione
+      for (uint8_t i = 0; i < TELEGRAM_AUTHORIZED_COUNT; i++) {
+        telegramBot.addAuthorizedUser(TELEGRAM_AUTHORIZED_USERS[i]);
+        Serial.printf("[Telegram] ✓ Utente autorizzato: %s\n", TELEGRAM_AUTHORIZED_USERS[i]);
+      }
+      
+      // Abilita bot se configurato
+      telegramBot.setEnabled(TELEGRAM_BOT_ENABLED);
+      
+      // La notifica di avvio la invia il task del bot dopo 20 s di funzionamento stabile
+    } else {
+      Serial.println("[Telegram] ⚠️ Errore inizializzazione bot");
+    }
+  } else {
+    Serial.println("[Telegram] ⚠️ Token non configurato - bot disabilitato");
+    Serial.println("[Telegram] Configura TELEGRAM_BOT_TOKEN in config.cpp");
+  }
+
   // Prima schermata
   updateDisplay();
 }
 
 void loop() {
+  // === WATCHDOG FEED (v2.3.5) - Auto-feed ogni 100ms ===
+  wdManager.feedIfNeeded();
+  
+  // === RECOVERY SYSTEM (v2.3.8) - Factory reset check ===
+  recoveryManager.checkFactoryReset();
+  
   // Aggiorna controller campane (non bloccante)
   bellController.update();
+
+  // === WIFI KEEPALIVE (v2.3.5+) - WiFiReconnectManager + RecoveryManager ===
+  if (millis() - lastWiFiCheck >= Config::Network::WIFI_CHECK_INTERVAL_MS) {
+    lastWiFiCheck = millis();
+    
+    // Skip check se in AP recovery mode
+    if (recoveryManager.isAPModeActive()) {
+      return; // Non fare nulla se in modalità recovery
+    }
+    
+    if (!apMode && !wifiManager.isConnected()) {
+      systemStatus.wifiConnected = false;
+
+      // tryReconnect() non-bloccante: avvia la connessione e ritorna immediatamente.
+      // Il risultato positivo si vede al prossimo ciclo via isConnected().
+      if (wifiManager.tryReconnect()) {
+        Serial.println("[WiFi] ✓ Riconnessione riuscita!");
+        Serial.printf("[WiFi] ✓ IP: %s\n", WiFi.localIP().toString().c_str());
+        systemStatus.wifiConnected = true;
+        recoveryManager.resetWiFiFailCount();
+      } else if (wifiManager.hadLastAttemptFailed()) {
+        // Solo timeout definitivo conta come fallimento per il recovery manager
+        recoveryManager.reportWiFiFailure();
+      }
+    } else if (wifiManager.isConnected() && !systemStatus.wifiConnected) {
+      // Rilevata riconnessione
+      Serial.println("[WiFi] ✓ Riconnessione rilevata!");
+      Serial.printf("[WiFi] ✓ IP: %s\n", WiFi.localIP().toString().c_str());
+      systemStatus.wifiConnected = true;
+      
+      // v2.3.8: Reset contatore fallimenti recovery
+      recoveryManager.resetWiFiFailCount();
+    }
+  }
+
+  // === FIX 2: NTP RE-SYNC - Risincronizza NTP ogni 1 ora ===
+  if (millis() - lastNTPSync >= 3600000) { // Ogni 1 ora (3600000 ms)
+    lastNTPSync = millis();
+    if (systemStatus.wifiConnected) {
+      Serial.println("[NTP] 🔄 Re-sync orario periodico...");
+      initSNTP(false); // Sync senza attesa bloccante
+      
+      // Verifica se sync è andato a buon fine
+      time_t now = time(nullptr);
+      if (now > 1000000) {
+        Serial.println("[NTP] ✓ Re-sync completato");
+        systemStatus.ntpSynced = true;
+        
+        // Aggiorna anche RTC se presente
+        if (systemStatus.rtcConnected) {
+          struct tm timeinfo;
+          if (getLocalTime(&timeinfo, 1000)) {
+            DateTime ntpTime(
+              timeinfo.tm_year + 1900,
+              timeinfo.tm_mon + 1,
+              timeinfo.tm_mday,
+              timeinfo.tm_hour,
+              timeinfo.tm_min,
+              timeinfo.tm_sec
+            );
+            rtc.adjust(ntpTime);
+            Serial.println("[NTP] ✓ RTC aggiornato da NTP");
+          }
+        }
+      } else {
+        Serial.println("[NTP] ⚠️ Re-sync fallito, riproverò tra 1 ora");
+      }
+    }
+  }
 
   // Aggiorna temperatura periodicamente
   if (millis() - lastTemperatureCheck >= TEMP_CHECK_INTERVAL) {
@@ -509,113 +1012,150 @@ void loop() {
     checkAndRunSchedules();
   }
 
+  // Auto report Telegram + riavvio sugli slot richiesti
+  checkAutoTelegramMaintenance();
+
+  // Il bot Telegram gira in un task dedicato (vedi TelegramBotManager): niente da fare qui
+
+  if (autoMaintenanceRestartPending && millis() >= autoMaintenanceRestartAt) {
+    Serial.println("[Maintenance] Riavvio automatico in esecuzione");
+    telegramBot.waitForOutbox(10000);
+    ESP.restart();
+  }
+
   // Comandi seriale
   processSerialCommands();
 
-  // Gestione pulsante fisico FUNERALE (debounce + cooldown)
+  // === PULSANTI FUNERALE (GPIO27) e CHIAMATA MESSA (GPIO32) ===
+  // Filtro anti-disturbo: conta solo una pressione stabile per almeno BTN_DEBOUNCE_MS.
+  // Click breve (rilasciato entro BTN_HOLD_MS): un colpo singolo.
+  // Tenuto premuto BTN_HOLD_MS: avvia la melodia.
   {
-    static uint32_t lastPressMs = 0;
-    static bool lastState = true; // pull-up: true=rilasciato
-    static uint32_t lastDebugMs = 0;
-    
-    bool raw = digitalRead(FUNERAL_BUTTON_PIN);
-    bool state = raw; // true=alto, false=basso
-    
-    // Debug semplice ogni 3 secondi
-    if (millis() - lastDebugMs > 3000) {
-      lastDebugMs = millis();
-      Serial.printf("[FUNERAL] GPIO27 = %d\n", raw);
+    struct BellButton {
+      uint8_t pin;
+      bool activeLow;
+      uint8_t melodyIndex;
+      uint8_t clickBell;
+      const char *name;
+      bool stable;          // stato filtrato: true = premuto
+      bool lastRaw;
+      uint32_t rawSince;    // da quando la lettura grezza è invariata
+      uint32_t pressedAt;
+      bool holdFired;
+    };
+    static BellButton buttons[] = {
+      {FUNERAL_BUTTON_PIN, Hardware::FUNERAL_BUTTON_ACTIVE_LOW, 0, 2, "FUNERALE", false, false, 0, 0, false},
+      {MASS_BUTTON_PIN,    Hardware::MASS_BUTTON_ACTIVE_LOW,    1, 1, "CHIAMATA MESSA", false, false, 0, 0, false},
+    };
+    static constexpr uint32_t BTN_DEBOUNCE_MS = 80;
+    static constexpr uint32_t BTN_HOLD_MS = 1000;
+    static constexpr uint16_t BTN_CLICK_PULSE_MS = 200;
+
+    uint32_t now = millis();
+    static bool buttonsInit = false;
+    if (!buttonsInit) {
+      // Un tasto già premuto (o in corto) all'avvio non fa nulla finché non viene rilasciato
+      buttonsInit = true;
+      for (BellButton &btn : buttons) {
+        btn.lastRaw = btn.stable = isButtonPressedLevel(digitalRead(btn.pin), btn.activeLow);
+        btn.rawSince = btn.pressedAt = now;
+        btn.holdFired = true;
+      }
     }
-    if (lastState != state) {
-      lastState = state;
-      Serial.printf("[BUTTON] GPIO27 cambiato: %d -> %d\n", !state, state);
-      bool isPressed = FUNERAL_PRESSED_LOW ? (!state) : state;
-      Serial.printf("[BUTTON] isPressedLogic: %s (FUNERAL_PRESSED_LOW=%s)\n", 
-                   isPressed ? "PREMUTO" : "rilasciato", FUNERAL_PRESSED_LOW ? "true" : "false");
-      if (isPressed) { // pressione
-        uint32_t now = millis();
-        if (now - lastPressMs > 800) { // debounce
-          lastPressMs = now;
-          // Avvia FUNERALE solo se non sta già suonando qualcosa
-          if (!bellController.isPlayingMelody()) {
-            Serial.println("FUNERALE: pulsante premuto");
-            // Assicura che la melodia 0 esista
-            if (bellController.getMelodyNoteCount(0) == 0) {
-              bellController.loadDefaultMelodies();
-            }
-            // Esegui in modalità test per bypassare campane disabilitate (se lo fossero)
+    for (BellButton &btn : buttons) {
+      bool raw = isButtonPressedLevel(digitalRead(btn.pin), btn.activeLow);
+      if (raw != btn.lastRaw) {
+        btn.lastRaw = raw;
+        btn.rawSince = now;
+      }
+      // Cambia stato solo se la lettura resta uguale per tutto il tempo di debounce
+      if (raw != btn.stable && now - btn.rawSince >= BTN_DEBOUNCE_MS) {
+        btn.stable = raw;
+        if (raw) {
+          btn.pressedAt = now;
+          btn.holdFired = false;
+          Serial.printf("[BUTTON] %s (GPIO%d) premuto\n", btn.name, btn.pin);
+        } else {
+          uint32_t held = now - btn.pressedAt;
+          Serial.printf("[BUTTON] %s (GPIO%d) rilasciato dopo %lu ms\n", btn.name, btn.pin, (unsigned long)held);
+          if (!btn.holdFired && !bellController.isPlayingMelody()) {
+            Serial.printf("%s: click -> colpo campana %d\n", btn.name, btn.clickBell);
+            // Modalità test per suonare anche con campane disabilitate (come la melodia)
             bellController.enableTestMode(true);
-            bellController.playMelody(0); // 0 = FUNERALE
+            bellController.ringBell(btn.clickBell, BTN_CLICK_PULSE_MS);
+            bellController.enableTestMode(false);
           }
         }
       }
-    }
-    // Fallback: se non ci sono stati cambiamenti per >10s, prova a invertire logica
-    static uint32_t lastChangeTime = millis();
-    static int lastRawValue = raw;
-    if (lastRawValue != raw) {
-      lastChangeTime = millis();
-      lastRawValue = raw;
-    }
-    
-    if (millis() - lastChangeTime > 10000) {
-      Serial.printf("[BUTTON] Nessun cambiamento per 10s, inverto polarità: %s -> %s\n",
-                   FUNERAL_PRESSED_LOW ? "LOW" : "HIGH", !FUNERAL_PRESSED_LOW ? "LOW" : "HIGH");
-      FUNERAL_PRESSED_LOW = !FUNERAL_PRESSED_LOW;
-      lastChangeTime = millis();
-    }
-  }
-
-  // === PULSANTE CHIAMATA MESSA (GPIO32) ===
-  {
-    static uint32_t lastMassPressMs = 0;
-    static bool lastMassState = true; // pull-up: true=rilasciato
-    static uint32_t lastMassDebugMs = 0;
-    
-    bool massRaw = digitalRead(MASS_BUTTON_PIN);
-    bool massState = massRaw; // true=alto, false=basso
-    
-    // Debug semplice ogni 3 secondi
-    if (millis() - lastMassDebugMs > 3000) {
-      lastMassDebugMs = millis();
-      Serial.printf("[MASS] GPIO32 = %d\n", massRaw);
-    }
-    
-    if (lastMassState != massState) {
-      lastMassState = massState;
-      Serial.printf("[BUTTON] GPIO32 cambiato: %d -> %d\n", !massState, massState);
-      bool isPressed = !massState; // GPIO32 con INPUT_PULLUP: LOW = premuto
-      Serial.printf("[BUTTON] isPressedLogic: %s (GPIO32)\n", 
-                   isPressed ? "PREMUTO" : "rilasciato");
-      if (isPressed) { // pressione
-        uint32_t now = millis();
-        if (now - lastMassPressMs > 800) { // debounce
-          lastMassPressMs = now;
-          // Avvia CHIAMATA MESSA solo se non sta già suonando qualcosa
-          if (!bellController.isPlayingMelody()) {
-            Serial.println("CHIAMATA MESSA: pulsante premuto (GPIO32)");
-            // Assicura che la melodia 1 esista
-            if (bellController.getMelodyNoteCount(1) == 0) {
-              bellController.loadDefaultMelodies();
-            }
-            // Esegui in modalità test per bypassare campane disabilitate
-            bellController.enableTestMode(true);
-            bellController.playMelody(1); // 1 = CHIAMATA MESSA
+      // Pressione lunga: avvia la melodia mentre il tasto è ancora premuto
+      if (btn.stable && !btn.holdFired && now - btn.pressedAt >= BTN_HOLD_MS) {
+        btn.holdFired = true;
+        if (!bellController.isPlayingMelody()) {
+          Serial.printf("%s: tenuto premuto -> avvio melodia\n", btn.name);
+          if (bellController.getMelodyNoteCount(btn.melodyIndex) == 0) {
+            bellController.loadDefaultMelodies();
           }
+          bellController.enableTestMode(true);
+          bellController.playMelody(btn.melodyIndex);
         }
       }
     }
   }
 
-  // Gestione pulsante CONFIG (GPIO35):
+  // === PULSANTE STOP / RIAVVIO (GPIO13) ===
+  // Pressione (>=50ms): ferma subito melodia e relè, con notifica Telegram.
+  // Tenuto 3 secondi: riavvia. Invia notifica Telegram prima del restart.
+  {
+    static bool lastResetState = true;   // pull-up: true = rilasciato
+    static uint32_t resetPressStart = 0;
+    static bool resetHandled = false;
+    static bool stopHandled = false;
+    static constexpr uint32_t STOP_DEBOUNCE_MS = 50;
+    static constexpr uint32_t RESET_HOLD_MS = 3000;
+
+    bool resetState = digitalRead(RESET_BUTTON_PIN);
+    bool resetPressed = isButtonPressedLevel(resetState, Hardware::RESET_BUTTON_ACTIVE_LOW);
+
+    if (resetPressed && !resetHandled) {
+      if (lastResetState) {                      // fronte di discesa
+        resetPressStart = millis();
+        stopHandled = false;
+      }
+      if (!stopHandled && millis() - resetPressStart >= STOP_DEBOUNCE_MS) {
+        stopHandled = true;
+        bool wasPlaying = bellController.isPlayingMelody();
+        String name = wasPlaying ? String(bellController.getMelodyName(bellController.getCurrentMelodyIndex())) : String();
+        bellController.stopMelody();
+        bellController.emergencyStop();          // stacca anche un colpo singolo in corso
+        Serial.println("[STOP] Pulsante GPIO13: arresto immediato");
+        if (wasPlaying && telegramBot.isEnabled()) {
+          telegramBot.sendNotification("⏹ Melodia \"" + name + "\" fermata con il pulsante.");
+        }
+      }
+      if (millis() - resetPressStart >= RESET_HOLD_MS) {
+        Serial.println("[RESET] Pulsante GPIO13 tenuto 3s: riavvio");
+        if (telegramBot.isEnabled()) {
+          telegramBot.sendNotification("🔄 Riavvio manuale richiesto via pulsante GPIO13.");
+          telegramBot.waitForOutbox(8000);
+        }
+        ESP.restart();
+        resetHandled = true;
+      }
+    } else if (!resetPressed) {
+      resetHandled = false;
+    }
+
+    lastResetState = !resetPressed;
+  }
+
+  // Gestione pulsante CONFIG (GPIO0):
   // - breve pressione (<2s): toggle campane abilitate
   // - lunga pressione (>=2s): attiva AP di configurazione
   {
   static bool lastCfgState = false; // GPIO0 boot button
     static uint32_t pressStart = 0;
     static bool longHandled = false;
-  // GPIO0 (boot button) è tipicamente ACTIVE-LOW con pullup (premuto = LOW)
-  bool pressed = (digitalRead(CONFIG_BUTTON_PIN) == LOW);
+  bool pressed = isButtonPressedLevel(digitalRead(CONFIG_BUTTON_PIN), Hardware::CONFIG_BUTTON_ACTIVE_LOW);
     uint32_t now = millis();
 
     // Edge di pressione
@@ -870,6 +1410,9 @@ void processSerialCommands() {
         Serial.println("enable_bells            - Abilita campane");
         Serial.println("disable_bells           - Disabilita campane");
         Serial.println("i2c / scan              - Scansione dispositivi I2C");
+        Serial.println("wifi_diag               - Diagnostica WiFi dettagliata");
+        Serial.println("ntp_diag                - Diagnostica NTP/orario dettagliata");
+        Serial.println("full_diag               - Diagnostica completa sistema");
         Serial.println("=========================\n");
         
     } else if (command == "debug") {
@@ -994,13 +1537,11 @@ void processSerialCommands() {
         
     } else if (command == "enable_bells") {
         systemStatus.bellsEnabled = true;
-        bellsEnabled = true;
         bellController.setEnabled(true);
         Serial.println("🔔 CAMPANE ABILITATE manualmente");
         
     } else if (command == "disable_bells") {
         systemStatus.bellsEnabled = false;
-        bellsEnabled = false;
         bellController.setEnabled(false);
         Serial.println("🔇 CAMPANE DISABILITATE manualmente");
         Serial.println("⚠️ ATTENZIONE: Le campane rimarranno disabilitate fino al prossimo riavvio");
@@ -1009,6 +1550,64 @@ void processSerialCommands() {
     } else if (command == "i2c" || command == "scan") {
         Serial.println("=== SCANSIONE DISPOSITIVI I2C ===");
         scanI2CDevices();
+        
+    } else if (command == "wifi_diag") {
+        printWiFiDiagnostics();
+        
+    } else if (command == "ntp_diag") {
+        printNTPDiagnostics();
+        
+    } else if (command == "full_diag") {
+        Serial.println("\n╔═══════════════════════════════════════╗");
+        Serial.println("║   DIAGNOSTICA COMPLETA SISTEMA       ║");
+        Serial.println("╚═══════════════════════════════════════╝\n");
+        
+        // Status generale
+        Serial.println("\n=== 📊 STATO GENERALE ===");
+        Serial.printf("Firmware: %s\n", Config::FIRMWARE_VERSION);
+        Serial.printf("Uptime: %lu ms (%.2f ore)\n", millis(), millis() / 3600000.0);
+        Serial.printf("Free Heap: %u bytes\n", ESP.getFreeHeap());
+        Serial.printf("Heap Size: %u bytes\n", ESP.getHeapSize());
+        Serial.printf("Chip Model: %s\n", ESP.getChipModel());
+        Serial.printf("CPU Freq: %u MHz\n", ESP.getCpuFreqMHz());
+        Serial.printf("Flash Size: %u bytes\n", ESP.getFlashChipSize());
+        
+        // WiFi
+        printWiFiDiagnostics();
+        
+        // NTP
+        printNTPDiagnostics();
+        
+        // Temperatura
+        Serial.println("\n=== 🌡️ TEMPERATURA ===");
+        Serial.printf("ESP32: %.1f°C [%s]\n", systemStatus.esp32Temperature, getTemperatureStatus().c_str());
+        Serial.printf("Protezione termica: %s\n", systemStatus.thermalProtection ? "ATTIVA" : "Non attiva");
+        Serial.printf("Warning temperatura: %s\n", systemStatus.temperatureWarning ? "SÌ" : "No");
+        
+        // Campane
+        Serial.println("\n=== 🔔 STATO CAMPANE ===");
+        Serial.printf("Campane abilitate: %s\n", systemStatus.bellsEnabled ? "SÌ" : "NO");
+        Serial.printf("Test mode: %s\n", testMode ? "ATTIVO" : "Non attivo");
+        Serial.printf("Melodia in play: %s\n", bellController.isPlayingMelody() ? "SÌ" : "No");
+        Serial.printf("Totale suonate: %d\n", systemStatus.totalBellRings);
+        Serial.printf("Ultima suonata: %lu ms fa\n", millis() - systemStatus.lastBellTime);
+        
+        // Programmazioni
+        Serial.println("\n=== 📅 PROGRAMMAZIONI ===");
+        Serial.printf("Settimanali attive: %d/%d\n", weeklyCount, MAX_WEEKLY_SCHEDULES);
+        Serial.printf("Eventi speciali: %d/%d\n", specialCount, MAX_SPECIAL_EVENTS);
+        
+        // Melodie
+        Serial.println("\n=== 🎵 MELODIE ===");
+        int melodyCount = 0;
+        for (int i = 0; i < 10; i++) {
+            if (bellController.getMelodyNoteCount(i) > 0) melodyCount++;
+        }
+        Serial.printf("Melodie caricate: %d/10\n", melodyCount);
+        
+        Serial.println("\n╔═══════════════════════════════════════╗");
+        Serial.println("║   FINE DIAGNOSTICA                   ║");
+        Serial.println("╚═══════════════════════════════════════╝\n");
         
     } else {
         Serial.printf("Comando sconosciuto: '%s'. Digita 'help' per l'elenco comandi.\n", command.c_str());
@@ -1022,6 +1621,19 @@ void checkAndRunSchedules(){
   if (!getLocalTm(ti)) {
     Serial.println("[SCHED] ERRORE: impossibile ottenere ora locale");
     return;
+  }
+  
+  // Cooldown: evita nuove esecuzioni se una melodia è appena terminata (<10s fa)
+  static uint32_t lastMelodyEndTime = 0;
+  if (systemStatus.lastBellTime > 0 && (millis() - systemStatus.lastBellTime < 10000)) {
+    // C'è una melodia in corso o appena terminata
+    if (bellController.isPlayingMelody()) {
+      return; // Melodia ancora in esecuzione
+    }
+    // Se la melodia è terminata da meno di 10s, aggiorna il timestamp
+    if (millis() - lastMelodyEndTime < 10000) {
+      return; // Cooldown attivo
+    }
   }
   
   // Debug dettagliato ogni cambio di minuto
@@ -1071,10 +1683,11 @@ void checkAndRunSchedules(){
       
       bellController.playMelody(e.melodyIndex);
       
-      // Aggiorna statistiche
+      // Aggiorna statistiche e cooldown
       systemStatus.totalBellRings++;
       systemStatus.lastBellTime = millis();
       systemStatus.activeMelody = e.melodyIndex;
+      lastMelodyEndTime = millis(); // Imposta cooldown
       
       return; // Esci dopo aver trovato ed eseguito un evento
     }
@@ -1112,6 +1725,7 @@ void checkAndRunSchedules(){
       bellController.playMelody(e.melodyIndex);
       systemStatus.totalBellRings++;
       systemStatus.lastBellTime = millis();
+      lastMelodyEndTime = millis(); // Imposta cooldown
       
       if (!e.isRecurring) {
         e.isActive = false; // one-shot consumed
@@ -1141,6 +1755,9 @@ void connectWiFi() {
   WiFi.setSleep(false);
   Serial.println("📡 Potenza WiFi impostata a 11dBm per ridurre riscaldamento");
   
+  // Carica configurazione di rete (IP statico o DHCP)
+  loadNetworkConfig();
+  
   // Carica le credenziali salvate
   if (SPIFFS.exists("/wifi_config.json")) {
     fs::File file = SPIFFS.open("/wifi_config.json", "r");
@@ -1155,32 +1772,97 @@ void connectWiFi() {
         Serial.print("SSID: ");
         Serial.println(savedSSID);
         
-        // Avvia connessione STA
-        WiFi.begin(savedSSID.c_str(), savedPassword.c_str());
-        Serial.println("Tentativo connessione...");
+        // === v2.3.8: Sistema recovery con DHCP fallback ===
+        bool staticIPSuccess = false;
+        bool dhcpFallbackUsed = false;
         
-        int attempts = 0;
-        while (WiFi.status() != WL_CONNECTED && attempts < 20) { // Timeout più breve e non bloccante
-          for (int i = 0; i < 10; i++) { // 10 x 100ms = 1s
-            delay(100);
-            yield();
-            // Opportunistic feed per Async stack
-            delay(0);
+        // TENTATIVO 1: IP Statico (se configurato)
+        if (!networkConfig.useDHCP && !wifiManager.hasStaticIPFailed()) {
+          Serial.println("[NETWORK] 🔧 Tentativo connessione con IP statico...");
+          if (!WiFi.config(networkConfig.staticIP, networkConfig.gateway, 
+                           networkConfig.subnet, networkConfig.dns1, networkConfig.dns2)) {
+            Serial.println("[NETWORK] ✗ Errore WiFi.config() - Fallback a DHCP");
+            wifiManager.reportStaticIPFailure();
+          } else {
+            Serial.println("[NETWORK] ✓ WiFi.config() applicato, tentativo connessione...");
+            WiFi.begin(savedSSID.c_str(), savedPassword.c_str());
+            
+            // Attendi connessione (30s timeout per IP statico)
+            int attempts = 0;
+            while (WiFi.status() != WL_CONNECTED && attempts < 30) {
+              for (int i = 0; i < 10; i++) { // 10 x 100ms = 1s
+                delay(100);
+                yield();
+                delay(0); // Feed asynch stack
+              }
+              Serial.print(".");
+              attempts++;
+            }
+            
+            if (WiFi.status() == WL_CONNECTED) {
+              staticIPSuccess = true;
+              Serial.println("\n[NETWORK] ✓ Connessione con IP statico riuscita!");
+            } else {
+              Serial.println("\n[NETWORK] ✗ Timeout IP statico (30s) - Fallback a DHCP");
+              wifiManager.reportStaticIPFailure();
+              WiFi.disconnect();
+              delay(500);
+            }
           }
-          Serial.print(".");
-          attempts++;
         }
         
+        // TENTATIVO 2: DHCP Fallback (se IP statico fallito O se DHCP configurato)
+        if (!staticIPSuccess) {
+          if (wifiManager.hasStaticIPFailed()) {
+            Serial.println("[NETWORK] 🔄 FALLBACK AUTOMATICO A DHCP (IP statico fallito)");
+            dhcpFallbackUsed = true;
+          } else {
+            Serial.println("[NETWORK] 🔧 Connessione con DHCP configurato");
+          }
+          
+          // Reset config e riconnetti con DHCP
+          WiFi.config(INADDR_NONE, INADDR_NONE, INADDR_NONE);
+          WiFi.begin(savedSSID.c_str(), savedPassword.c_str());
+          
+          int attempts = 0;
+          while (WiFi.status() != WL_CONNECTED && attempts < 20) { // 20s per DHCP
+            for (int i = 0; i < 10; i++) {
+              delay(100);
+              yield();
+              delay(0);
+            }
+            Serial.print(".");
+            attempts++;
+          }
+        }
+        
+        // === VALUTAZIONE RISULTATO ===
         if (WiFi.status() == WL_CONNECTED) {
           Serial.println("");
           Serial.println("✓ CONNESSIONE WiFi RIUSCITA!");
           Serial.print("✓ Indirizzo IP: ");
           Serial.println(WiFi.localIP());
+          Serial.print("✓ Gateway: ");
+          Serial.println(WiFi.gatewayIP());
+          Serial.print("✓ Subnet: ");
+          Serial.println(WiFi.subnetMask());
+          Serial.print("✓ DNS: ");
+          Serial.println(WiFi.dnsIP());
+          Serial.print("✓ Modalità: ");
+          if (dhcpFallbackUsed) {
+            Serial.println("DHCP (fallback automatico da IP statico)");
+          } else {
+            Serial.println(networkConfig.useDHCP ? "DHCP" : "IP Statico");
+          }
+          
           systemStatus.wifiConnected = true;
           apMode = false;
           
+          // Reset contatori recovery
+          recoveryManager.resetWiFiFailCount();
+          
           // Riduci ulteriormente la potenza una volta connesso
-          WiFi.setTxPower(WIFI_POWER_8_5dBm); // Ancora più bassa per uso continuo
+          WiFi.setTxPower(WIFI_POWER_8_5dBm);
           Serial.println("📡 Potenza WiFi ridotta a 8.5dBm per prevenire surriscaldamento");
           
           // Inizializza SNTP con fuso orario Italia e attendi sync
@@ -1188,6 +1870,10 @@ void connectWiFi() {
           
           Serial.println("=== FINE CONNESSIONE WiFi ===");
           return;
+        } else {
+          // v2.3.8: Notifica recovery manager
+          Serial.println("\n[NETWORK] ✗ Connessione fallita anche con DHCP!");
+          recoveryManager.reportWiFiFailure();
         }
       }
       file.close();
@@ -1227,27 +1913,42 @@ void setupWebServer() {
   
   // API per ottenere lo stato del sistema
   server.on("/api/status", HTTP_GET, [](AsyncWebServerRequest *request){
+    // Rate limiting (150ms minimo tra richieste)
     static uint32_t lastMs = 0;
     uint32_t now = millis();
-    if (now - lastMs < 150) { // troppo frequente: alleggeriamo
+    if (now - lastMs < 150) {
       request->send(429, "text/plain", "Too Many Requests");
       return;
     }
     lastMs = now;
-    Serial.println("📡 Richiesta ricevuta: /api/status");
-    DynamicJsonDocument doc(1024);
-    doc["wifiConnected"] = systemStatus.wifiConnected;
-    doc["ntpSynced"] = systemStatus.ntpSynced;
-    doc["rtcConnected"] = systemStatus.rtcConnected;
-    doc["bellsEnabled"] = systemStatus.bellsEnabled;
-    doc["testMode"] = testMode;
-    doc["schedulerActive"] = schedulerActive;
-    doc["apMode"] = apMode;
-    doc["timezoneOffset"] = currentTimezoneOffset;
-    doc["isDST"] = isDST;
-    doc["firmwareVersion"] = FIRMWARE_VERSION;
-    // Uptime (ms dall'avvio) e orario di avvio (epoch se disponibile)
-    doc["uptimeMs"] = (uint32_t)millis();
+    
+    // Cache: se risposta già generata negli ultimi 1s, riutilizzala
+    if (now - lastStatusCache < CACHE_DURATION_MS && cachedStatusJson.length() > 0) {
+      AsyncWebServerResponse* r = request->beginResponse(200, "application/json", cachedStatusJson);
+      r->addHeader("Connection", "close");
+      r->addHeader("X-Cache", "HIT"); // Debug header
+      request->send(r);
+      return;
+    }
+    
+    Serial.println("📡 Richiesta ricevuta: /api/status (cache miss)");
+
+    CommandHandler& handler = CommandHandler::getInstance();
+    CommandHandler::CommandResult result = handler.getStatus();
+    if (!result.success || !result.jsonData) {
+      request->send(500, "application/json", String("{\"success\":false,\"message\":\"") + result.message + "\"}");
+      return;
+    }
+
+    JsonDocument& doc = *result.jsonData;
+    doc["temperatureStatus"] = getTemperatureStatus();
+    doc["timezoneDescription"] = String("Italia UTC+") + String(utcOffsetHours) + (isDST ? " (Ora Legale)" : " (Ora Solare)");
+    doc["isPlaying"] = bellController.isPlayingMelody();
+    if (bellController.isPlayingMelody()) {
+      doc["playingName"] = bellController.getMelodyName(bellController.getCurrentMelodyIndex());
+    }
+
+    // Uptime e boot epoch (manteniamo i campi storici della UI)
     uint32_t bootEpoch = 0;
     if (systemStatus.ntpSynced) {
       time_t now = time(nullptr);
@@ -1256,63 +1957,36 @@ void setupWebServer() {
       DateTime now = rtc.now();
       bootEpoch = (uint32_t)now.unixtime() - (millis() / 1000);
     }
-    if (bootEpoch > 0) doc["bootEpoch"] = bootEpoch;
-    // Aggiungi campi utili alla UI
-    doc["totalBellRings"] = systemStatus.totalBellRings;
-    doc["lastBellTime"] = systemStatus.lastBellTime;
-        
-    // Informazioni temperatura ESP32
-    doc["esp32Temperature"] = systemStatus.esp32Temperature;
-    doc["temperatureWarning"] = systemStatus.temperatureWarning;
-    doc["thermalProtection"] = systemStatus.thermalProtection;
-    doc["temperatureStatus"] = getTemperatureStatus();
-        
-    // Descrizione fuso orario
-    String tzDesc = String("Italia UTC+") + String(utcOffsetHours) + (isDST ? " (Ora Legale)" : " (Ora Solare)");
-    doc["timezoneDescription"] = tzDesc;
-        
-    if (systemStatus.wifiConnected) {
-      String ip = WiFi.localIP().toString();
-      doc["ipAddress"] = ip;
-      doc["wifiIP"] = ip;
-    } else {
-      String apIp = WiFi.softAPIP().toString();
-      doc["ipAddress"] = apIp;
-      doc["apIP"] = apIp;
+    if (bootEpoch > 0) {
+      doc["bootEpoch"] = bootEpoch;
     }
-        
-  String response;
-  serializeJson(doc, response);
-  AsyncWebServerResponse* r = request->beginResponse(200, "application/json", response);
-  r->addHeader("Connection", "close");
-  request->send(r);
+
+    cachedStatusJson = "";
+    serializeJson(doc, cachedStatusJson);
+    lastStatusCache = now;
+    
+    AsyncWebServerResponse* r = request->beginResponse(200, "application/json", cachedStatusJson);
+    r->addHeader("Connection", "close");
+    r->addHeader("X-Cache", "MISS"); // Debug header
+    request->send(r);
         
     Serial.println("✓ Risposta inviata: status JSON");
   });
   
   // API per ottenere le melodie
   server.on("/api/melodies", HTTP_GET, [](AsyncWebServerRequest *request){
-    DynamicJsonDocument doc(2048);
-    JsonArray melodies = doc.createNestedArray("melodies");
-        
-    for (int i = 0; i < 10; i++) {
-      yield();
-      if (bellController.getMelodyNoteCount(i) > 0) {
-        JsonObject melody = melodies.createNestedObject();
-        String melodyName = bellController.getMelodyName(i);
-        melody["id"] = i;
-        melody["name"] = melodyName;
-        melody["noteCount"] = bellController.getMelodyNoteCount(i);
-        melody["duration"] = bellController.getMelodyDuration(i);
-        melody["isActive"] = true;
-      }
+    CommandHandler& handler = CommandHandler::getInstance();
+    CommandHandler::CommandResult result = handler.getMelodiesList();
+    if (!result.success || !result.jsonData) {
+      request->send(500, "application/json", String("{\"success\":false,\"message\":\"") + result.message + "\"}");
+      return;
     }
-        
-  String response;
-  serializeJson(doc, response);
-  AsyncWebServerResponse* r = request->beginResponse(200, "application/json", response);
-  r->addHeader("Connection", "close");
-  request->send(r);
+
+    String response;
+    serializeJson(*result.jsonData, response);
+    AsyncWebServerResponse* r = request->beginResponse(200, "application/json", response);
+    r->addHeader("Connection", "close");
+    request->send(r);
         
     Serial.println("✓ Risposta inviata: melodie JSON");
   });
@@ -1322,21 +1996,15 @@ void setupWebServer() {
     if (!request->hasParam("index")) { request->send(400, "application/json", "{\"success\":false,\"message\":\"index mancante\"}"); return; }
     int idx = request->getParam("index")->value().toInt();
     if (idx < 0 || idx >= 10) { request->send(400, "application/json", "{\"success\":false,\"message\":\"index non valido\"}"); return; }
-    int count = bellController.getMelodyNoteCount(idx);
-    if (count <= 0) { request->send(404, "application/json", "{\"success\":false,\"message\":\"melodia vuota\"}"); return; }
-    DynamicJsonDocument doc(4096);
-    doc["index"] = idx;
-    doc["name"] = bellController.getMelodyName(idx);
-    doc["noteCount"] = count;
-    JsonArray ns = doc.createNestedArray("notes");
-    const BellNote* notes = bellController.getMelodyNotes(idx);
-    for (int i=0;i<count;i++){
-      JsonObject n = ns.createNestedObject();
-      n["bellNumber"] = notes[i].bellNumber;
-      n["duration"] = notes[i].duration;
-      n["delay"] = notes[i].delay;
+
+    CommandHandler& handler = CommandHandler::getInstance();
+    CommandHandler::CommandResult result = handler.getMelodyDetails((uint8_t)idx);
+    if (!result.success || !result.jsonData) {
+      request->send(404, "application/json", String("{\"success\":false,\"message\":\"") + result.message + "\"}");
+      return;
     }
-  String resp; serializeJson(doc, resp);
+
+  String resp; serializeJson(*result.jsonData, resp);
   AsyncWebServerResponse* r = request->beginResponse(200, "application/json", resp);
   r->addHeader("Connection", "close");
   request->send(r);
@@ -1344,30 +2012,26 @@ void setupWebServer() {
 
   // API orario corrente per UI
   server.on("/api/time", HTTP_GET, [](AsyncWebServerRequest *request){
-    DynamicJsonDocument doc(256);
-    char bufTime[20];
-    char bufDate[20];
-    if (systemStatus.rtcConnected) {
-      DateTime now = rtc.now();
-      snprintf(bufTime, sizeof(bufTime), "%02d:%02d:%02d", now.hour(), now.minute(), now.second());
-      snprintf(bufDate, sizeof(bufDate), "%02d/%02d/%04d", now.day(), now.month(), now.year());
-    } else if (manualTimeValid) {
-      snprintf(bufTime, sizeof(bufTime), "%02d:%02d:%02d", manualTime.hour(), manualTime.minute(), manualTime.second());
-      snprintf(bufDate, sizeof(bufDate), "%02d/%02d/%04d", manualTime.day(), manualTime.month(), manualTime.year());
-    } else if (systemStatus.ntpSynced) {
-      time_t now = time(nullptr);
-      struct tm * timeinfo = localtime(&now);
-      snprintf(bufTime, sizeof(bufTime), "%02d:%02d:%02d", timeinfo->tm_hour, timeinfo->tm_min, timeinfo->tm_sec);
-      snprintf(bufDate, sizeof(bufDate), "%02d/%02d/%04d", timeinfo->tm_mday, timeinfo->tm_mon+1, timeinfo->tm_year+1900);
-    } else {
-      // fallback a --:--:--
-      strlcpy(bufTime, "--:--:--", sizeof(bufTime));
-      strlcpy(bufDate, "--/--/----", sizeof(bufDate));
+    unsigned long now = millis();
+    
+    // Cache: se risposta già generata negli ultimi 1s, riutilizzala
+    if (now - lastTimeCache < CACHE_DURATION_MS && cachedTimeJson.length() > 0) {
+      request->send(200, "application/json", cachedTimeJson);
+      return;
     }
-    doc["time"] = String(bufTime);
-    doc["date"] = String(bufDate);
-    String resp; serializeJson(doc, resp);
-    request->send(200, "application/json", resp);
+    
+    CommandHandler& handler = CommandHandler::getInstance();
+    CommandHandler::CommandResult result = handler.getCurrentTime();
+    if (!result.success || !result.jsonData) {
+      request->send(503, "application/json", String("{\"success\":false,\"message\":\"") + result.message + "\"}");
+      return;
+    }
+
+    cachedTimeJson = "";
+    serializeJson(*result.jsonData, cachedTimeJson);
+    lastTimeCache = now;
+    
+    request->send(200, "application/json", cachedTimeJson);
   });
   
   // API per ottenere programmazioni settimanali
@@ -1404,12 +2068,24 @@ void setupWebServer() {
     if (!doc.containsKey("schedules") || !doc["schedules"].is<JsonArray>()){
       request->send(400, "application/json", "{\"success\":false,\"message\":\"Campo schedules mancante\"}"); return;
     }
+    
+    // Track max ID for auto-generation
+    uint8_t nextId = 1;
     weeklyCount = 0;
     for (JsonObject o : doc["schedules"].as<JsonArray>()){
       if (weeklyCount>=MAX_WEEKLY_SCHEDULES) break;
       WeeklySchedule &e = weeklyArr[weeklyCount++];
       strlcpy(e.name, (o["name"] | ""), sizeof(e.name));
-      e.id = o["id"] | weeklyCount; e.dayOfWeek = (DayOfWeek)(int)(o["dayOfWeek"] | 0);
+      
+      // Preserve existing ID or generate new one
+      if (o.containsKey("id")) {
+        e.id = o["id"];
+        if (e.id >= nextId) nextId = e.id + 1;
+      } else {
+        e.id = nextId++;
+      }
+      
+      e.dayOfWeek = (DayOfWeek)(int)(o["dayOfWeek"] | 0);
       e.hour = o["hour"] | 0; e.minute = o["minute"] | 0; e.melodyIndex = o["melodyIndex"] | 0; e.isActive = o["isActive"] | true;
       if ((weeklyCount & 3) == 0) { yield(); }
     }
@@ -1449,12 +2125,24 @@ void setupWebServer() {
     if (!doc.containsKey("events") || !doc["events"].is<JsonArray>()){
       request->send(400, "application/json", "{\"success\":false,\"message\":\"Campo events mancante\"}"); return;
     }
+    
+    // Track max ID for auto-generation
+    uint8_t nextId = 1;
     specialCount = 0;
     for (JsonObject o : doc["events"].as<JsonArray>()){
       if (specialCount>=MAX_SPECIAL_EVENTS) break;
       SpecialEvent &e = specialArr[specialCount++];
       strlcpy(e.name, (o["name"] | ""), sizeof(e.name));
-      e.id = o["id"] | specialCount; e.type = (EventType)(int)(o["type"] | 5);
+      
+      // Preserve existing ID or generate new one
+      if (o.containsKey("id")) {
+        e.id = o["id"];
+        if (e.id >= nextId) nextId = e.id + 1;
+      } else {
+        e.id = nextId++;
+      }
+      
+      e.type = (EventType)(int)(o["type"] | 5);
       e.year = o["year"] | 0; e.month = o["month"] | 0; e.day = o["day"] | 0;
       e.hour = o["hour"] | 0; e.minute = o["minute"] | 0; e.melodyIndex = o["melodyIndex"] | 0; e.isActive = o["isActive"] | true; e.isRecurring = o["isRecurring"] | false;
       if ((specialCount & 3) == 0) { yield(); }
@@ -1466,13 +2154,10 @@ void setupWebServer() {
   // API: forza resync SNTP
   server.on("/api/ntp-resync", HTTP_POST, [](AsyncWebServerRequest *request){
     Serial.println("📡 Richiesta ricevuta: /api/ntp-resync");
-    if (!systemStatus.wifiConnected) {
-      request->send(503, "application/json", "{\"success\":false,\"message\":\"WiFi non connesso\"}");
-      return;
-    }
-    initSNTP(true);
-    String resp = String("{\"success\":") + (systemStatus.ntpSynced?"true":"false") + ",\"ntpSynced\":" + (systemStatus.ntpSynced?"true":"false") + "}";
-    request->send(200, "application/json", resp);
+    CommandHandler& handler = CommandHandler::getInstance();
+    CommandHandler::CommandResult result = handler.resyncNTP();
+    String resp = String("{\"success\":") + (result.success ? "true" : "false") + ",\"ntpSynced\":" + (systemStatus.ntpSynced ? "true" : "false") + ",\"message\":\"" + result.message + "\"}";
+    request->send(result.success ? 200 : 503, "application/json", resp);
   });
 
   // API: backup completo (melodie + schedules). WiFi escluso per sicurezza.
@@ -1480,7 +2165,7 @@ void setupWebServer() {
     AsyncResponseStream* s = request->beginResponseStream("application/json");
     // Header
     s->print('{');
-    s->print("\"firmwareVersion\":\""); s->print(FIRMWARE_VERSION); s->print("\",");
+    s->print("\"firmwareVersion\":\""); s->print(Config::FIRMWARE_VERSION); s->print("\",");
     // timestamp
     time_t now = time(nullptr); struct tm *ti = localtime(&now);
     char ts[32]; if (ti) snprintf(ts, sizeof(ts), "%04d-%02d-%02dT%02d:%02d:%02d", ti->tm_year+1900, ti->tm_mon+1, ti->tm_mday, ti->tm_hour, ti->tm_min, ti->tm_sec); else strlcpy(ts, "unknown", sizeof(ts));
@@ -1646,9 +2331,12 @@ void setupWebServer() {
   // API diagnostica: scansione I2C (mostra indirizzi trovati)
   server.on("/api/i2c-scan", HTTP_GET, [](AsyncWebServerRequest *request){
     Serial.println("📡 Richiesta ricevuta: /api/i2c-scan");
-    DynamicJsonDocument doc(512);
+    
+    // Ottimizzazione: StaticJsonDocument invece di Dynamic
+    StaticJsonDocument<512> doc;
     JsonArray arr = doc.createNestedArray("devices");
     uint8_t count = 0;
+    
     for (uint8_t address = 1; address < 127; address++) {
       Wire.beginTransmission(address);
       uint8_t error = Wire.endTransmission();
@@ -1659,8 +2347,10 @@ void setupWebServer() {
         count++;
       }
     }
+    
     doc["count"] = count;
-    String resp; serializeJson(doc, resp);
+    String resp; 
+    serializeJson(doc, resp);
     request->send(200, "application/json", resp);
     Serial.printf("✓ I2C scan: %d dispositivi\n", count);
   });
@@ -1676,56 +2366,18 @@ void setupWebServer() {
     String* body = (String*)request->_tempObject;
     body->concat((const char*)data, len);
     if (index + len < total) { yield(); return; }
-    DynamicJsonDocument doc(12288);
-    DeserializationError derr = deserializeJson(doc, *body);
+    String payload = *body;
     delete body; request->_tempObject = nullptr;
-    if (derr) { request->send(400, "application/json", "{\"success\":false,\"message\":\"JSON non valido\"}"); return; }
-    
-    // Test per ID oppure per sequenza di note ad-hoc
-  if (doc.containsKey("notes") && doc["notes"].is<JsonArray>()) {
-      JsonArray ns = doc["notes"].as<JsonArray>();
-      const size_t maxSteps = min((size_t)MAX_MELODY_STEPS, ns.size());
-      BellNote tempNotes[MAX_MELODY_STEPS];
-      uint8_t count = 0;
-      for (size_t i = 0; i < maxSteps; i++) {
-        JsonObject n = ns[i];
-        int b = n["bellNumber"] | 1;
-        int d = n["duration"] | 300;
-        int dl = n["delay"] | 800;
-        if (b < 1 || b > 2) continue;
-        tempNotes[count++] = { (uint8_t)b, (uint16_t)d, (uint16_t)dl };
-      }
-      if (count == 0) {
-        request->send(400, "application/json", "{\"success\":false,\"message\":\"Nessuna nota valida\"}");
-        return;
-      }
-      // Trova primo slot libero; se non c'è, libera l'ultimo (9)
-      int freeIdx = -1;
-      for (int i = 0; i < 10; i++) {
-        if (bellController.getMelodyNoteCount(i) == 0) { freeIdx = i; break; }
-      }
-      if (freeIdx < 0) { bellController.deleteMelody(9); freeIdx = 9; }
-      bool ok = bellController.addMelody("Test", tempNotes, count);
-      if (!ok) { request->send(500, "application/json", "{\"success\":false,\"message\":\"Impossibile aggiungere melodia\"}"); return; }
-      // Se l'algoritmo di add ha usato un altro slot (primo libero), individua l'indice effettivo
-      int playIdx = freeIdx;
-      for (int i = 0; i < 10; i++) {
-        if (bellController.getMelodyNoteCount(i) == count && String(bellController.getMelodyName(i)) == String("Test")) { playIdx = i; break; }
-      }
-      bellController.playMelody(playIdx);
-      request->send(200, "application/json", String("{\"success\":true,\"message\":\"Test melodia ad-hoc avviato\",\"index\":") + playIdx + "}");
-      Serial.printf("✓ Test melodia ad-hoc con %d note (slot %d)\n", count, playIdx);
-    } else {
-      int melodyId = doc["melodyId"] | -1;
-      if (melodyId >= 0 && melodyId < 10 && bellController.getMelodyNoteCount(melodyId) > 0) {
-        bellController.playMelody(melodyId);
-        request->send(200, "application/json", "{\"success\":true,\"message\":\"Melodia in riproduzione\"}");
-        Serial.printf("✓ Riproduzione melodia ID: %d\n", melodyId);
-      } else {
-        request->send(400, "application/json", "{\"success\":false,\"message\":\"ID melodia non valido\"}");
-        Serial.println("❌ ID melodia non valido");
-      }
+
+    CommandHandler& handler = CommandHandler::getInstance();
+    CommandHandler::CommandResult result = handler.testMelody(payload);
+
+    String response = String("{\"success\":") + (result.success ? "true" : "false") + ",\"message\":\"" + result.message + "\"";
+    if (result.success && result.jsonData && result.jsonData->containsKey("index")) {
+      response += String(",\"index\":") + (*result.jsonData)["index"].as<int>();
     }
+    response += "}";
+    request->send(result.success ? 200 : 400, "application/json", response);
   });
 
   // API salva melodia
@@ -1739,46 +2391,18 @@ void setupWebServer() {
     String* body = (String*)request->_tempObject;
     body->concat((const char*)data, len);
     if (index + len < total) { yield(); return; }
-    DynamicJsonDocument doc(12288);
-    DeserializationError err = deserializeJson(doc, *body);
+    String payload = *body;
     delete body; request->_tempObject = nullptr;
-    if (err) {
-      request->send(400, "application/json", "{\"success\":false,\"message\":\"JSON non valido\"}");
-      return;
+
+    CommandHandler& handler = CommandHandler::getInstance();
+    CommandHandler::CommandResult result = handler.saveMelody(payload);
+
+    String response = String("{\"success\":") + (result.success ? "true" : "false") + ",\"message\":\"" + result.message + "\"";
+    if (result.success && result.jsonData && result.jsonData->containsKey("index")) {
+      response += String(",\"index\":") + (*result.jsonData)["index"].as<int>();
     }
-    String name = doc["name"] | "Senza nome";
-    JsonArray ns = doc["notes"].as<JsonArray>();
-    if (!ns || ns.size() == 0) {
-      request->send(400, "application/json", "{\"success\":false,\"message\":\"Note mancanti\"}");
-      return;
-    }
-    BellNote temp[MAX_MELODY_STEPS];
-    uint8_t count = 0;
-    for (JsonObject n : ns) {
-      int b = n["bellNumber"] | 1;
-      int d = n["duration"] | 300;
-      int dl = n["delay"] | 800;
-      if (b < 1 || b > 2) continue;
-      temp[count++] = { (uint8_t)b, (uint16_t)d, (uint16_t)dl };
-      if (count >= MAX_MELODY_STEPS) break;
-    }
-    if (count == 0) {
-      request->send(400, "application/json", "{\"success\":false,\"message\":\"Nessuna nota valida\"}");
-      return;
-    }
-    bool ok = bellController.addMelody(name.c_str(), temp, count);
-    if (!ok) {
-      request->send(500, "application/json", "{\"success\":false,\"message\":\"Nessuno slot libero\"}");
-      return;
-    }
-    // Trova indice assegnato
-    int assigned = -1;
-    for (int i=0;i<10;i++){
-      if (bellController.getMelodyNoteCount(i) == count && String(bellController.getMelodyName(i)) == name) { assigned = i; break; }
-    }
-    saveAllMelodiesToFS();
-    String resp = String("{\"success\":true,\"index\":") + (assigned>=0? String(assigned): String(-1)) + "}";
-    request->send(200, "application/json", resp);
+    response += "}";
+    request->send(result.success ? 200 : 400, "application/json", response);
   });
 
   // API aggiorna melodia esistente
@@ -1792,30 +2416,13 @@ void setupWebServer() {
     String* body = (String*)request->_tempObject;
     body->concat((const char*)data, len);
     if (index + len < total) { yield(); return; }
-    DynamicJsonDocument doc(12288);
-    DeserializationError err = deserializeJson(doc, *body);
+    String payload = *body;
     delete body; request->_tempObject = nullptr;
-    if (err) { request->send(400, "application/json", "{\"success\":false,\"message\":\"JSON non valido\"}"); return; }
-    int idx = doc["index"] | -1;
-    if (idx < 0 || idx >= 10) { request->send(400, "application/json", "{\"success\":false,\"message\":\"index non valido\"}"); return; }
-    String name = doc["name"] | "Senza nome";
-    JsonArray ns = doc["notes"].as<JsonArray>();
-    if (!ns || ns.size()==0){ request->send(400, "application/json", "{\"success\":false,\"message\":\"Note mancanti\"}"); return; }
-    BellNote temp[MAX_MELODY_STEPS];
-    uint8_t count = 0;
-    for (JsonObject n : ns){
-      int b = n["bellNumber"] | 1;
-      int d = n["duration"] | 300;
-      int dl = n["delay"] | 800;
-      if (b<1 || b>2) continue;
-      temp[count++] = { (uint8_t)b, (uint16_t)d, (uint16_t)dl };
-      if (count>=MAX_MELODY_STEPS) break;
-    }
-    if (count==0){ request->send(400, "application/json", "{\"success\":false,\"message\":\"Nessuna nota valida\"}"); return; }
-    bool ok = bellController.updateMelody((uint8_t)idx, name.c_str(), temp, count);
-    if (!ok){ request->send(500, "application/json", "{\"success\":false,\"message\":\"Aggiornamento fallito\"}"); return; }
-    saveAllMelodiesToFS();
-    request->send(200, "application/json", "{\"success\":true}");
+
+    CommandHandler& handler = CommandHandler::getInstance();
+    CommandHandler::CommandResult result = handler.updateMelody(payload);
+    String response = String("{\"success\":") + (result.success ? "true" : "false") + ",\"message\":\"" + result.message + "\"}";
+    request->send(result.success ? 200 : 400, "application/json", response);
   });
 
   // API elimina melodia
@@ -1831,24 +2438,29 @@ void setupWebServer() {
   DynamicJsonDocument doc(256);
   DeserializationError parseErr = deserializeJson(doc, *body);
     delete body; request->_tempObject = nullptr;
-  if (parseErr) { request->send(400, "application/json", "{\"success\":false}"); return; }
+  if (parseErr) { request->send(400, "application/json", "{\"success\":false,\"message\":\"JSON non valido\"}"); return; }
     int idx = doc["index"] | -1;
-    if (idx < 0 || idx >= 10) { request->send(400, "application/json", "{\"success\":false}"); return; }
-    bool ok = bellController.deleteMelody(idx);
-    if (ok) saveAllMelodiesToFS();
-    request->send(200, "application/json", String("{\"success\":") + (ok?"true":"false") + "}");
+    if (idx < 0 || idx >= 10) { request->send(400, "application/json", "{\"success\":false,\"message\":\"index non valido\"}"); return; }
+    CommandHandler& handler = CommandHandler::getInstance();
+    CommandHandler::CommandResult result = handler.deleteMelody((uint8_t)idx);
+    String response = String("{\"success\":") + (result.success ? "true" : "false") + ",\"message\":\"" + result.message + "\"}";
+    request->send(result.success ? 200 : 400, "application/json", response);
   });
 
   // API per fermare la melodia in riproduzione (POST e GET)
   server.on("/api/stop-melody", HTTP_POST, [](AsyncWebServerRequest *request){
     Serial.println("📡 Richiesta ricevuta: /api/stop-melody (POST)");
-    bellController.stopMelody();
-    request->send(200, "application/json", "{\"success\":true,\"message\":\"Melodia fermata\"}");
+    CommandHandler& handler = CommandHandler::getInstance();
+    CommandHandler::CommandResult result = handler.stopMelody();
+    String response = String("{\"success\":") + (result.success ? "true" : "false") + ",\"message\":\"" + result.message + "\"}";
+    request->send(result.success ? 200 : 500, "application/json", response);
   });
   server.on("/api/stop-melody", HTTP_GET, [](AsyncWebServerRequest *request){
     Serial.println("📡 Richiesta ricevuta: /api/stop-melody (GET)");
-    bellController.stopMelody();
-    request->send(200, "application/json", "{\"success\":true,\"message\":\"Melodia fermata\"}");
+    CommandHandler& handler = CommandHandler::getInstance();
+    CommandHandler::CommandResult result = handler.stopMelody();
+    String response = String("{\"success\":") + (result.success ? "true" : "false") + ",\"message\":\"" + result.message + "\"}";
+    request->send(result.success ? 200 : 500, "application/json", response);
   });
   
   // API per aggiornamento orario manuale
@@ -1882,8 +2494,6 @@ void setupWebServer() {
         }
         // Aggiorna variabili di sistema (simula sync NTP)
         systemStatus.ntpSynced = true;
-        // Forza refresh display
-        updateDisplay();
         request->send(200, "application/json", "{\"success\":true,\"message\":\"Orario aggiornato\"}");
         Serial.print("✓ Richiesta aggiornamento orario: ");
         Serial.println(dateTime);
@@ -1930,8 +2540,8 @@ void setupWebServer() {
     Serial.println(" caratteri)");
     
     if (newSSID.length() > 0 && newPassword.length() > 0) {
-      // Salva le credenziali su SPIFFS
-      DynamicJsonDocument doc(512);
+      // Salva le credenziali su SPIFFS (ottimizzazione: StaticJsonDocument)
+      StaticJsonDocument<512> doc;
       doc["ssid"] = newSSID;
       doc["password"] = newPassword;
       
@@ -1951,6 +2561,84 @@ void setupWebServer() {
     } else {
       request->send(400, "application/json", "{\"success\":false,\"message\":\"SSID e password richiesti\"}");
       Serial.println("❌ SSID o password mancanti");
+    }
+  });
+
+  // === API CONFIGURAZIONE RETE (IP STATICO/DHCP) ===
+  
+  // GET /api/network-config - Ottieni configurazione di rete attuale
+  server.on("/api/network-config", HTTP_GET, [](AsyncWebServerRequest *request){
+    DynamicJsonDocument doc(512);
+    
+    doc["dhcp"] = networkConfig.useDHCP;
+    doc["static_ip"] = networkConfig.staticIP.toString();
+    doc["gateway"] = networkConfig.gateway.toString();
+    doc["subnet"] = networkConfig.subnet.toString();
+    doc["dns1"] = networkConfig.dns1.toString();
+    doc["dns2"] = networkConfig.dns2.toString();
+    
+    // Aggiungi info corrente
+    doc["current_ip"] = WiFi.localIP().toString();
+    doc["current_gateway"] = WiFi.gatewayIP().toString();
+    doc["current_subnet"] = WiFi.subnetMask().toString();
+    doc["current_dns"] = WiFi.dnsIP().toString();
+    
+    String response;
+    serializeJson(doc, response);
+    request->send(200, "application/json", response);
+  });
+  
+  // POST /api/network-config - Salva nuova configurazione di rete
+  server.on("/api/network-config", HTTP_POST, [](AsyncWebServerRequest *request){}, NULL, 
+    [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total){
+    
+    DynamicJsonDocument doc(512);
+    DeserializationError error = deserializeJson(doc, data, len);
+    
+    if (error) {
+      request->send(400, "application/json", "{\"success\":false,\"error\":\"JSON non valido\"}");
+      return;
+    }
+    
+    // Validazione parametri
+    bool useDHCP = doc["dhcp"] | true;
+    
+    if (!useDHCP) {
+      // Validazione IP statico
+      String ip = doc["static_ip"] | "";
+      String gw = doc["gateway"] | "";
+      String sn = doc["subnet"] | "";
+      String d1 = doc["dns1"] | "";
+      String d2 = doc["dns2"] | "";
+      
+      // Verifica formato IP
+      IPAddress testIP, testGW, testSN, testD1, testD2;
+      if (!testIP.fromString(ip) || !testGW.fromString(gw) || 
+          !testSN.fromString(sn) || !testD1.fromString(d1) || !testD2.fromString(d2)) {
+        request->send(400, "application/json", 
+          "{\"success\":false,\"error\":\"Formato IP non valido\"}");
+        return;
+      }
+      
+      // Aggiorna configurazione
+      networkConfig.useDHCP = false;
+      networkConfig.staticIP = testIP;
+      networkConfig.gateway = testGW;
+      networkConfig.subnet = testSN;
+      networkConfig.dns1 = testD1;
+      networkConfig.dns2 = testD2;
+    } else {
+      networkConfig.useDHCP = true;
+    }
+    
+    // Salva su SPIFFS
+    if (saveNetworkConfig()) {
+      request->send(200, "application/json", 
+        "{\"success\":true,\"message\":\"Configurazione rete salvata, riavvio necessario\"}");
+      Serial.println("[NETWORK] Configurazione salvata, riavviare per applicare");
+    } else {
+      request->send(500, "application/json", 
+        "{\"success\":false,\"error\":\"Errore salvataggio configurazione\"}");
     }
   });
 
@@ -1998,6 +2686,50 @@ void setupWebServer() {
     Serial.printf("✓ test-relay eseguito: relay=%d duration=%d\n", relay, duration);
   });
   
+  // === API RECOVERY SYSTEM (v2.3.8) ===
+  
+  // GET /api/recovery-status - Stato sistema recovery
+  server.on("/api/recovery-status", HTTP_GET, [](AsyncWebServerRequest *request){
+    DynamicJsonDocument doc(512);
+    doc["ap_mode_active"] = recoveryManager.isAPModeActive();
+    doc["wifi_fail_count"] = recoveryManager.getWiFiFailCount();
+    doc["wifi_max_retries"] = 3;
+    doc["static_ip_fail_count"] = wifiManager.getStaticIPFailCount();
+    doc["factory_reset_pin"] = 0; // GPIO0 = BOOT
+    doc["factory_reset_hold_ms"] = 10000;
+    
+    if (recoveryManager.isAPModeActive()) {
+      doc["message"] = "🆘 RECOVERY MODE - Sistema in modalità AP";
+      doc["ap_ssid"] = "ChurchBells_Recovery";
+      doc["ap_ip"] = "192.168.4.1";
+    } else if (recoveryManager.getWiFiFailCount() > 0) {
+      doc["message"] = String("⚠️ Tentativi WiFi falliti: ") + String(recoveryManager.getWiFiFailCount()) + "/3";
+    } else {
+      doc["message"] = "✅ Sistema normale - Nessun recovery attivo";
+    }
+    
+    String output;
+    serializeJson(doc, output);
+    request->send(200, "application/json", output);
+  });
+  
+  // POST /api/trigger-recovery - Attiva manualmente AP mode (debug)
+  server.on("/api/trigger-recovery", HTTP_POST, [](AsyncWebServerRequest *request){
+    Serial.println("[API] 🆘 Trigger manuale recovery mode richiesto");
+    recoveryManager.startAPMode();
+    
+    DynamicJsonDocument doc(256);
+    doc["success"] = true;
+    doc["ap_ssid"] = "ChurchBells_Recovery";
+    doc["ap_ip"] = "192.168.4.1";
+    doc["ap_password"] = "recovery123";
+    doc["message"] = "Recovery mode attivato manualmente";
+    
+    String output;
+    serializeJson(doc, output);
+    request->send(200, "application/json", output);
+  });
+  
   // API per abilitare/disabilitare campane
   server.on("/api/toggle-bells", HTTP_GET, [](AsyncWebServerRequest *request){
     bool enabled = false;
@@ -2007,13 +2739,17 @@ void setupWebServer() {
     } else {
       enabled = !systemStatus.bellsEnabled; // toggle if no param
     }
-    Serial.printf("[GET] toggle-bells -> %d\n", enabled);
-    bellController.setEnabled(enabled);
-    systemStatus.bellsEnabled = enabled;
-    bellsEnabled = enabled;
-    updateDisplay();
-    request->send(200, "application/json", String("{\"success\":true,\"enabled\":" ) + (enabled?"true":"false") + "}");
+    
+    // Usa CommandHandler per operazione unificata
+    CommandHandler& handler = CommandHandler::getInstance();
+    CommandHandler::CommandResult result = handler.toggleBells(enabled);
+    
+    String response = String("{\"success\":") + (result.success ? "true" : "false") 
+                    + ",\"enabled\":" + (enabled ? "true" : "false")
+                    + ",\"message\":\"" + result.message + "\"}";
+    request->send(200, "application/json", response);
   });
+  
   server.on("/api/toggle-bells", HTTP_POST, [](AsyncWebServerRequest *request){}, NULL, [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total){
     Serial.println("📡 Richiesta ricevuta: /api/toggle-bells (POST)");
     if (index == 0) {
@@ -2023,9 +2759,10 @@ void setupWebServer() {
     String* body = (String*)request->_tempObject;
     if (len > 0) body->concat((const char*)data, len);
     if (index + len < total) { return; }
+    
     bool enabled = false;
     if (body->length() > 0) {
-      DynamicJsonDocument doc(256);
+      StaticJsonDocument<256> doc;
       DeserializationError err = deserializeJson(doc, *body);
       if (!err && doc.containsKey("enabled")) {
         enabled = doc["enabled"];
@@ -2037,40 +2774,62 @@ void setupWebServer() {
       enabled = !systemStatus.bellsEnabled;
     }
     delete body; request->_tempObject = nullptr;
-    Serial.printf("Toggle bells -> %d\n", enabled ? 1 : 0);
-    bellController.setEnabled(enabled);
-    systemStatus.bellsEnabled = enabled;
-    bellsEnabled = enabled;
-    updateDisplay();
-    request->send(200, "application/json", String("{\"success\":true,\"enabled\":") + (enabled?"true":"false") + "}");
+    
+    // Usa CommandHandler per operazione unificata
+    CommandHandler& handler = CommandHandler::getInstance();
+    CommandHandler::CommandResult result = handler.toggleBells(enabled);
+    
+    String response = String("{\"success\":") + (result.success ? "true" : "false")
+                    + ",\"enabled\":" + (enabled ? "true" : "false")
+                    + ",\"message\":\"" + result.message + "\"}";
+    request->send(200, "application/json", response);
   });
 
   // API diagnostica: lettura stato pin relè e LED
   server.on("/api/relay-status", HTTP_GET, [](AsyncWebServerRequest *request){
+    // Rate limiting (150ms minimo tra richieste)
     static uint32_t lastMs = 0;
     uint32_t now = millis();
-    if (now - lastMs < 150) { // troppo frequente: alleggeriamo
+    if (now - lastMs < 150) {
       request->send(429, "text/plain", "Too Many Requests");
       return;
     }
     lastMs = now;
-    Serial.println("📡 Richiesta ricevuta: /api/relay-status");
-    DynamicJsonDocument doc(256);
-    doc["relay_active_level"] = "LOW (active when LOW)";
+    
+    // Cache: se risposta già generata negli ultimi 1s, riutilizzala
+    if (now - lastRelayStatusCache < CACHE_DURATION_MS && cachedRelayStatusJson.length() > 0) {
+      request->send(200, "application/json", cachedRelayStatusJson);
+      return;
+    }
+    
+    Serial.println("📡 Richiesta ricevuta: /api/relay-status (cache miss)");
+    
+    // Ottimizzazione: StaticJsonDocument invece di Dynamic
+    StaticJsonDocument<256> doc;
+    doc["relay_active_level"] = Hardware::RELAY_ACTIVE_HIGH ? "HIGH" : "LOW";
     doc["enabled"] = systemStatus.bellsEnabled;
-    int r1 = -1, r2 = -1, led = -1;
-    r1 = digitalRead(RELAY1_PIN);
-    r2 = digitalRead(RELAY2_PIN);
-    led = digitalRead(STATUS_LED_PIN);
+    
+    int r1 = digitalRead(RELAY1_PIN);
+    int r2 = digitalRead(RELAY2_PIN);
+    int led = digitalRead(STATUS_LED_PIN);
+    
     doc["relay1_raw"] = r1;
     doc["relay2_raw"] = r2;
     doc["statusLed_raw"] = led;
-    String resp;
-    serializeJson(doc, resp);
-    request->send(200, "application/json", resp);
+    doc["relay1_on"] = (r1 == RELAY_ON);
+    doc["relay2_on"] = (r2 == RELAY_ON);
+    doc["master_on"] = (digitalRead(MASTER_RELAY_PIN) == Hardware::MASTER_ON);
+    
+    // Serializza e aggiorna cache
+    cachedRelayStatusJson = "";
+    serializeJson(doc, cachedRelayStatusJson);
+    lastRelayStatusCache = now;
+    
+    request->send(200, "application/json", cachedRelayStatusJson);
   });
 
-  // API diagnostica: impostare direttamente il pin del relè (/api/set-relay?relay=1&value=0)
+  // API diagnostica: accende (value=1) o spegne (value=0) un relè, indipendentemente dalla polarità.
+  // ATTENZIONE: value=1 resta acceso finché non si invia value=0 (non usare con i martelli collegati)
   server.on("/api/set-relay", HTTP_GET, [](AsyncWebServerRequest *request){
     Serial.println("📡 Richiesta ricevuta: /api/set-relay");
     int relay = 1;
@@ -2078,8 +2837,19 @@ void setupWebServer() {
     if (request->hasParam("relay")) relay = request->getParam("relay")->value().toInt();
     if (request->hasParam("value")) value = request->getParam("value")->value().toInt();
 
-    if (relay < 1 || relay > 2) {
-      request->send(400, "application/json", "{\"success\":false,\"message\":\"relay must be 1 or 2\"}");
+    // relay=3: relè generale (GPIO33). level=0/1 imposta il livello grezzo del pin.
+    if (relay == 3 && request->hasParam("level")) {
+      int level = request->getParam("level")->value().toInt() ? HIGH : LOW;
+      pinMode(MASTER_RELAY_PIN, OUTPUT);
+      digitalWrite(MASTER_RELAY_PIN, level);
+      String resp = "{\"success\":true,\"relay\":3,\"level\":" + String(level) +
+                    ",\"read\":" + String(digitalRead(MASTER_RELAY_PIN)) + "}";
+      request->send(200, "application/json", resp);
+      Serial.printf("Set master GPIO%d level -> %d\n", MASTER_RELAY_PIN, level);
+      return;
+    }
+    if (relay < 1 || relay > 3) {
+      request->send(400, "application/json", "{\"success\":false,\"message\":\"relay must be 1, 2 or 3\"}");
       return;
     }
     if (value != 0 && value != 1) {
@@ -2087,28 +2857,384 @@ void setupWebServer() {
       return;
     }
 
+    if (relay == 3) {
+      pinMode(MASTER_RELAY_PIN, Hardware::MASTER_PIN_MODE);
+      digitalWrite(MASTER_RELAY_PIN, value ? Hardware::MASTER_ON : Hardware::MASTER_OFF);
+      String resp = "{\"success\":true,\"relay\":3,\"value\":" + String(value) +
+                    ",\"read\":" + String(digitalRead(MASTER_RELAY_PIN)) + "}";
+      request->send(200, "application/json", resp);
+      Serial.printf("Set master -> %d\n", value);
+      return;
+    }
     int pin = (relay == 1) ? RELAY1_PIN : RELAY2_PIN;
     pinMode(pin, OUTPUT);
-    digitalWrite(pin, value ? HIGH : LOW);
+    digitalWrite(pin, value ? RELAY_ON : RELAY_OFF);
     String resp = "{\"success\":true,\"relay\":" + String(relay) + ",\"value\":" + String(value) + "}";
     request->send(200, "application/json", resp);
     Serial.printf("Set relay %d -> %d\n", relay, value);
   });
+  
+  // === ENDPOINT TELEGRAM BOT (v2.3.9) ===
+  
+  // GET /api/telegram/status - Ottieni stato bot e lista utenti
+  server.on("/api/telegram/status", HTTP_GET, [](AsyncWebServerRequest *request){
+    Serial.println("📡 Richiesta ricevuta: /api/telegram/status");
+    
+    StaticJsonDocument<1024> doc;
+    doc["enabled"] = telegramBot.isEnabled();
+    doc["initialized"] = telegramBot.isEnabled(); // Se enabled, è anche initialized
+    doc["messageCount"] = telegramBot.getMessageCount();
+    doc["commandCount"] = telegramBot.getCommandCount();
+    doc["lastUpdate"] = telegramBot.getLastUpdateTime();
+    
+    // Token configurato (mascherato per sicurezza)
+    String token = String(TELEGRAM_BOT_TOKEN);
+    bool tokenConfigured = (token.length() > 0 && token != "123456789:ABCdefGHIjklMNOpqrsTUVwxyz");
+    doc["tokenConfigured"] = tokenConfigured;
+    if (tokenConfigured) {
+      // Mostra solo primi e ultimi 4 caratteri
+      String maskedToken = token.substring(0, 8) + "..." + token.substring(token.length() - 4);
+      doc["tokenMasked"] = maskedToken;
+    }
+    
+    // Lista utenti autorizzati
+    JsonArray users = doc.createNestedArray("authorizedUsers");
+    String usersList = telegramBot.getAuthorizedUsers();
+    if (usersList.length() > 0) {
+      // Parsing della lista (formato: "id1, id2, id3")
+      int startIdx = 0;
+      int commaIdx = usersList.indexOf(',', startIdx);
+      while (commaIdx > 0) {
+        String userId = usersList.substring(startIdx, commaIdx);
+        userId.trim();
+        if (userId.length() > 0) users.add(userId);
+        startIdx = commaIdx + 1;
+        commaIdx = usersList.indexOf(',', startIdx);
+      }
+      // Ultimo elemento
+      String userId = usersList.substring(startIdx);
+      userId.trim();
+      if (userId.length() > 0) users.add(userId);
+    }
+    
+    String response;
+    serializeJson(doc, response);
+    request->send(200, "application/json", response);
+  });
+  
+  // POST /api/telegram/add-user - Aggiungi utente autorizzato
+  server.on("/api/telegram/add-user", HTTP_POST, [](AsyncWebServerRequest *request){}, NULL,
+    [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total){
+      Serial.println("📡 Richiesta ricevuta: /api/telegram/add-user");
+      
+      // Gestione body a chunk: accumula fino a ricezione completa
+      if (index == 0) {
+        String* body = new String();
+        body->reserve(total);
+        request->_tempObject = body;
+      }
+      
+      String* body = reinterpret_cast<String*>(request->_tempObject);
+      if (!body) {
+        request->send(500, "application/json", "{\"success\":false,\"message\":\"Errore interno parsing body\"}");
+        return;
+      }
+      
+      body->concat(reinterpret_cast<const char*>(data), len);
+      if (index + len < total) {
+        return;
+      }
+      
+      // Parse JSON body
+      StaticJsonDocument<256> doc;
+      DeserializationError error = deserializeJson(doc, *body);
+      delete body;
+      request->_tempObject = nullptr;
+      
+      if (error) {
+        request->send(400, "application/json", "{\"success\":false,\"message\":\"JSON non valido\"}");
+        return;
+      }
+      
+      const char* chatIdKey = nullptr;
+      if (doc.containsKey("chatId")) {
+        chatIdKey = "chatId";
+      } else if (doc.containsKey("clientId")) {
+        chatIdKey = "clientId";
+      } else if (doc.containsKey("chat_id")) {
+        chatIdKey = "chat_id";
+      }
+
+      if (!chatIdKey) {
+        request->send(400, "application/json", "{\"success\":false,\"message\":\"chatId/clientId mancante\"}");
+        return;
+      }
+      
+      String chatId = doc[chatIdKey].as<String>();
+      chatId.trim();
+      
+      if (chatId.length() == 0) {
+        request->send(400, "application/json", "{\"success\":false,\"message\":\"chatId vuoto\"}");
+        return;
+      }
+      
+      // Valida che sia un numero
+      bool isNumeric = true;
+      for (size_t i = 0; i < chatId.length(); i++) {
+        if (!isdigit(chatId[i]) && chatId[i] != '-') {
+          isNumeric = false;
+          break;
+        }
+      }
+      
+      if (!isNumeric) {
+        request->send(400, "application/json", "{\"success\":false,\"message\":\"chatId deve essere numerico\"}");
+        return;
+      }
+      
+      // Aggiungi utente
+      if (telegramBot.addAuthorizedUser(chatId)) {
+        saveTelegramUsersToFS();  // Persistenza su SPIFFS
+        String resp = "{\"success\":true,\"message\":\"Utente aggiunto\",\"chatId\":\"" + chatId + "\"}";
+        request->send(200, "application/json", resp);
+        Serial.printf("✓ Utente Telegram aggiunto: %s\n", chatId.c_str());
+        
+        // Invia notifica all'utente
+        telegramBot.sendMessage(chatId, "✅ Sei stato autorizzato a controllare il sistema campanile! Usa /help per vedere i comandi disponibili.");
+      } else {
+        request->send(400, "application/json", "{\"success\":false,\"message\":\"Limite massimo utenti raggiunto (10) o già presente\"}");
+      }
+    }
+  );
+  
+  // POST /api/telegram/remove-user - Rimuovi utente autorizzato
+  server.on("/api/telegram/remove-user", HTTP_POST, [](AsyncWebServerRequest *request){}, NULL,
+    [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total){
+      Serial.println("📡 Richiesta ricevuta: /api/telegram/remove-user");
+      
+      // Gestione body a chunk: accumula fino a ricezione completa
+      if (index == 0) {
+        String* body = new String();
+        body->reserve(total);
+        request->_tempObject = body;
+      }
+      
+      String* body = reinterpret_cast<String*>(request->_tempObject);
+      if (!body) {
+        request->send(500, "application/json", "{\"success\":false,\"message\":\"Errore interno parsing body\"}");
+        return;
+      }
+      
+      body->concat(reinterpret_cast<const char*>(data), len);
+      if (index + len < total) {
+        return;
+      }
+      
+      // Parse JSON body
+      StaticJsonDocument<256> doc;
+      DeserializationError error = deserializeJson(doc, *body);
+      delete body;
+      request->_tempObject = nullptr;
+      
+      if (error) {
+        request->send(400, "application/json", "{\"success\":false,\"message\":\"JSON non valido\"}");
+        return;
+      }
+      
+      const char* chatIdKey = nullptr;
+      if (doc.containsKey("chatId")) {
+        chatIdKey = "chatId";
+      } else if (doc.containsKey("clientId")) {
+        chatIdKey = "clientId";
+      } else if (doc.containsKey("chat_id")) {
+        chatIdKey = "chat_id";
+      }
+
+      if (!chatIdKey) {
+        request->send(400, "application/json", "{\"success\":false,\"message\":\"chatId/clientId mancante\"}");
+        return;
+      }
+      
+      String chatId = doc[chatIdKey].as<String>();
+      chatId.trim();
+      
+      if (telegramBot.removeAuthorizedUser(chatId)) {
+        saveTelegramUsersToFS();  // Persistenza su SPIFFS
+        String resp = "{\"success\":true,\"message\":\"Utente rimosso\",\"chatId\":\"" + chatId + "\"}";
+        request->send(200, "application/json", resp);
+        Serial.printf("✓ Utente Telegram rimosso: %s\n", chatId.c_str());
+        
+        // Notifica utente rimosso
+        telegramBot.sendMessage(chatId, "⚠️ La tua autorizzazione al sistema campanile è stata revocata.");
+      } else {
+        request->send(400, "application/json", "{\"success\":false,\"message\":\"Utente non trovato\"}");
+      }
+    }
+  );
+  
+  // POST /api/telegram/toggle - Abilita/disabilita bot
+  server.on("/api/telegram/toggle", HTTP_POST, [](AsyncWebServerRequest *request){}, NULL,
+    [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total){
+      Serial.println("📡 Richiesta ricevuta: /api/telegram/toggle");
+      
+      // Gestione body a chunk: accumula fino a ricezione completa
+      if (index == 0) {
+        String* body = new String();
+        body->reserve(total);
+        request->_tempObject = body;
+      }
+      
+      String* body = reinterpret_cast<String*>(request->_tempObject);
+      if (!body) {
+        request->send(500, "application/json", "{\"success\":false,\"message\":\"Errore interno parsing body\"}");
+        return;
+      }
+      
+      body->concat(reinterpret_cast<const char*>(data), len);
+      if (index + len < total) {
+        return;
+      }
+      
+      StaticJsonDocument<128> doc;
+      DeserializationError error = deserializeJson(doc, *body);
+      delete body;
+      request->_tempObject = nullptr;
+      
+      if (error) {
+        request->send(400, "application/json", "{\"success\":false,\"message\":\"JSON non valido\"}");
+        return;
+      }
+      
+      if (!doc.containsKey("enabled")) {
+        request->send(400, "application/json", "{\"success\":false,\"message\":\"enabled mancante\"}");
+        return;
+      }
+      
+      bool enabled = doc["enabled"].as<bool>();
+      telegramBot.setEnabled(enabled);
+      
+      String resp = "{\"success\":true,\"enabled\":" + String(enabled ? "true" : "false") + "}";
+      request->send(200, "application/json", resp);
+      Serial.printf("✓ Bot Telegram %s\n", enabled ? "abilitato" : "disabilitato");
+    }
+  );
+  
+  // POST /api/telegram/send-test - Invia messaggio di test
+  server.on("/api/telegram/send-test", HTTP_POST, [](AsyncWebServerRequest *request){
+    Serial.println("📡 Richiesta ricevuta: /api/telegram/send-test");
+    
+    String testMsg = "🧪 *Messaggio di Test*\n\n";
+    testMsg += "Questo è un messaggio di test dal sistema campanile.\n";
+    testMsg += "Se lo ricevi, il bot funziona correttamente! ✅";
+    
+    telegramBot.sendNotification(testMsg);
+    
+    request->send(200, "application/json", "{\"success\":true,\"message\":\"Messaggio di test inviato\"}");
+  });
+  
+  // === ENDPOINT DIAGNOSTICA AVANZATA ===
+  server.on("/api/diagnostics", HTTP_GET, [](AsyncWebServerRequest *request){
+    Serial.println("📊 Richiesta ricevuta: /api/diagnostics");
+    
+    // Ottimizzazione: StaticJsonDocument invece di Dynamic
+    StaticJsonDocument<2048> doc;
+    
+    // === MEMORIA ===
+    JsonObject heap = doc.createNestedObject("heap");
+    heap["free"] = ESP.getFreeHeap();
+    heap["min"] = ESP.getMinFreeHeap();
+    heap["size"] = ESP.getHeapSize();
+    heap["maxAlloc"] = ESP.getMaxAllocHeap();
+    
+    // Calcola frammentazione: quanto dello heap libero è allocabile in un blocco
+    uint32_t freeHeap = ESP.getFreeHeap();
+    uint32_t maxAlloc = ESP.getMaxAllocHeap();
+    float fragmentation = 0;
+    if (freeHeap > 0) {
+      fragmentation = 100.0 - ((float)maxAlloc * 100.0 / (float)freeHeap);
+    }
+    heap["fragmentation"] = round(fragmentation * 10) / 10.0; // 1 decimale
+    
+    // === CPU ===
+    JsonObject cpu = doc.createNestedObject("cpu");
+    cpu["frequency"] = getCpuFrequencyMhz();
+    cpu["cores"] = ESP.getChipCores();
+    
+    // === WiFi ===
+    JsonObject wifi = doc.createNestedObject("wifi");
+    wifi["connected"] = WiFi.status() == WL_CONNECTED;
+    if (WiFi.status() == WL_CONNECTED) {
+      wifi["rssi"] = WiFi.RSSI();
+      wifi["txPower"] = WiFi.getTxPower();
+      wifi["ssid"] = WiFi.SSID();
+      wifi["ip"] = WiFi.localIP().toString();
+      
+      // Qualità segnale
+      int rssi = WiFi.RSSI();
+      String quality = "Scarso";
+      if (rssi >= -50) quality = "Eccellente";
+      else if (rssi >= -60) quality = "Buono";
+      else if (rssi >= -70) quality = "Discreto";
+      wifi["quality"] = quality;
+    }
+    
+    // === TEMPERATURA ===
+    JsonObject temp = doc.createNestedObject("temperature");
+    temp["internal"] = temperatureRead();
+    temp["esp32"] = systemStatus.esp32Temperature;
+    temp["warning"] = systemStatus.temperatureWarning;
+    temp["protection"] = systemStatus.thermalProtection;
+    
+    // === UPTIME ===
+    JsonObject uptime = doc.createNestedObject("uptime");
+    uint32_t uptimeSeconds = millis() / 1000;
+    uptime["seconds"] = uptimeSeconds;
+    uptime["minutes"] = uptimeSeconds / 60;
+    uptime["hours"] = uptimeSeconds / 3600;
+    uptime["days"] = uptimeSeconds / 86400;
+    
+    // === SISTEMA ===
+    JsonObject system = doc.createNestedObject("system");
+    system["firmware"] = Config::FIRMWARE_VERSION;
+    system["chipModel"] = ESP.getChipModel();
+    system["chipRevision"] = ESP.getChipRevision();
+    system["sdkVersion"] = ESP.getSdkVersion();
+    system["flashSize"] = ESP.getFlashChipSize();
+    system["flashSpeed"] = ESP.getFlashChipSpeed() / 1000000; // MHz
+    
+    // === TASK STACK ===
+    system["stackHighWaterMark"] = uxTaskGetStackHighWaterMark(NULL);
+    
+    // === CAMPANILE STATUS ===
+    JsonObject bells = doc.createNestedObject("bells");
+    bells["enabled"] = systemStatus.bellsEnabled;
+    bells["totalRings"] = systemStatus.totalBellRings;
+    bells["lastRingTime"] = systemStatus.lastBellTime;
+    bells["schedulerActive"] = schedulerActive;
+    
+    String response;
+    serializeJson(doc, response);
+    request->send(200, "application/json", response);
+    
+    Serial.println("📊 Diagnostica inviata");
+  });
+  
   // Serve i file statici da SPIFFS (no-cache per evitare UI vecchie)
   // Registrato alla fine per non ombreggiare le API.
   // Protezione Basic Auth per UI statica
-  server.on("/", HTTP_GET, [](AsyncWebServerRequest *request){
+  // Pagine web incorporate nel firmware, già compresse (vedi tools/embed_web.py)
+  auto sendPage = [](AsyncWebServerRequest *request, const uint8_t *data, size_t len) {
     if (!request->authenticate(ADMIN_USER, ADMIN_PASSWORD)) {
       return request->requestAuthentication();
     }
-    request->send(SPIFFS, "/index.html", String(), false);
-  });
-  server.on("/index.html", HTTP_GET, [](AsyncWebServerRequest *request){
-    if (!request->authenticate(ADMIN_USER, ADMIN_PASSWORD)) {
-      return request->requestAuthentication();
-    }
-    request->send(SPIFFS, "/index.html", String(), false);
-  });
+    AsyncWebServerResponse *r = request->beginResponse_P(200, "text/html", data, len);
+    r->addHeader("Content-Encoding", "gzip");
+    r->addHeader("Cache-Control", "no-cache");
+    request->send(r);
+  };
+  server.on("/", HTTP_GET, [sendPage](AsyncWebServerRequest *request){ sendPage(request, WEB_INDEX_GZ, WEB_INDEX_GZ_LEN); });
+  server.on("/index.html", HTTP_GET, [sendPage](AsyncWebServerRequest *request){ sendPage(request, WEB_INDEX_GZ, WEB_INDEX_GZ_LEN); });
+  server.on("/diag.html", HTTP_GET, [sendPage](AsyncWebServerRequest *request){ sendPage(request, WEB_DIAG_GZ, WEB_DIAG_GZ_LEN); });
   // Per le altre risorse statiche sotto / (css/js/png/etc.) proteggile con un handler generico
   server.onNotFound([](AsyncWebServerRequest *request){
     // Consenti sempre API pubbliche
@@ -2123,8 +3249,6 @@ void setupWebServer() {
     // Prova a servire dal FS, altrimenti 404
     if (SPIFFS.exists(request->url())) {
       request->send(SPIFFS, request->url(), String(), false);
-    } else if (request->url() == "/") {
-      request->send(SPIFFS, "/index.html", String(), false);
     } else {
       request->send(404, "text/plain", "Not Found");
     }
@@ -2134,167 +3258,238 @@ void setupWebServer() {
   Serial.println("✓ Web Server configurato");
 }
 
-void updateDisplay() {
-  Serial.println("[DEBUG] Chiamata: updateDisplay()");
+// === FUNZIONI DIAGNOSTICA ===
+void printWiFiDiagnostics() {
+  Serial.println("\n=== 📡 DIAGNOSTICA WIFI ===");
+  Serial.printf("Stato connessione: %s\n", WiFi.status() == WL_CONNECTED ? "CONNESSA" : "DISCONNESSA");
+  Serial.printf("Modalità: %s\n", apMode ? "AP" : "STA");
   
-  // Aggiorna temperatura prima di mostrare il display
-  systemStatus.esp32Temperature = getESP32Temperature();
+  if (WiFi.status() == WL_CONNECTED) {
+    Serial.printf("SSID: %s\n", WiFi.SSID().c_str());
+    Serial.printf("IP Address: %s\n", WiFi.localIP().toString().c_str());
+    Serial.printf("Gateway: %s\n", WiFi.gatewayIP().toString().c_str());
+    Serial.printf("DNS: %s\n", WiFi.dnsIP().toString().c_str());
+    Serial.printf("Signal Strength (RSSI): %d dBm\n", WiFi.RSSI());
+    Serial.printf("MAC Address: %s\n", WiFi.macAddress().c_str());
+    Serial.printf("Tx Power: %d (ridotta per thermal management)\n", WiFi.getTxPower());
+  } else {
+    Serial.printf("Motivo disconnessione: ");
+    switch(WiFi.status()) {
+      case WL_NO_SSID_AVAIL: Serial.println("SSID non disponibile"); break;
+      case WL_CONNECT_FAILED: Serial.println("Connessione fallita"); break;
+      case WL_CONNECTION_LOST: Serial.println("Connessione persa"); break;
+      case WL_DISCONNECTED: Serial.println("Disconnesso"); break;
+      default: Serial.printf("Codice: %d\n", WiFi.status()); break;
+    }
+    
+    if (apMode) {
+      Serial.printf("AP SSID: %s\n", AP_SSID);
+      Serial.printf("AP IP: %s\n", WiFi.softAPIP().toString().c_str());
+      Serial.printf("Clients connessi: %d\n", WiFi.softAPgetStationNum());
+    }
+  }
   
-  tft.fillScreen(TFT_BLACK);
-  yield();
+  Serial.printf("systemStatus.wifiConnected: %s\n", systemStatus.wifiConnected ? "true" : "false");
+  Serial.printf("Uptime WiFi check: %lu ms\n", millis() - lastWiFiCheck);
+  Serial.println("===========================\n");
+}
 
-  // Prepara dimensioni display
+void printNTPDiagnostics() {
+  Serial.println("\n=== 🕐 DIAGNOSTICA NTP/ORARIO ===");
+  Serial.printf("NTP Sincronizzato: %s\n", systemStatus.ntpSynced ? "SÌ" : "NO");
+  Serial.printf("RTC Connesso: %s\n", systemStatus.rtcConnected ? "SÌ" : "NO");
+  Serial.printf("Ora manuale valida: %s\n", manualTimeValid ? "SÌ" : "NO");
+  
+  // Epoch time dal sistema
+  time_t now = time(nullptr);
+  if (now > 1000000) {
+    struct tm* timeinfo = localtime(&now);
+    Serial.printf("System time (NTP): %04d-%02d-%02d %02d:%02d:%02d\n",
+                  timeinfo->tm_year + 1900, timeinfo->tm_mon + 1, timeinfo->tm_mday,
+                  timeinfo->tm_hour, timeinfo->tm_min, timeinfo->tm_sec);
+    Serial.printf("Epoch timestamp: %lu\n", (unsigned long)now);
+    Serial.printf("Timezone: UTC+%d (%s)\n", utcOffsetHours, isDST ? "DST" : "Standard");
+  } else {
+    Serial.println("⚠️ System time non valido (epoch < 1970)");
+  }
+  
+  // RTC time se disponibile
+  if (systemStatus.rtcConnected) {
+    DateTime rtcNow = rtc.now();
+    Serial.printf("RTC time: %04d-%02d-%02d %02d:%02d:%02d\n",
+                  rtcNow.year(), rtcNow.month(), rtcNow.day(),
+                  rtcNow.hour(), rtcNow.minute(), rtcNow.second());
+    
+    // Calcola drift tra RTC e NTP
+    if (now > 1000000) {
+      long drift = (long)now - (long)rtcNow.unixtime();
+      Serial.printf("Drift NTP-RTC: %ld secondi ", drift);
+      if (abs(drift) > 60) {
+        Serial.println("⚠️ ELEVATO - Richiede re-sync");
+      } else if (abs(drift) > 10) {
+        Serial.println("⚠️ Moderato");
+      } else {
+        Serial.println("✓ OK");
+      }
+    }
+  }
+  
+  Serial.printf("Ultimo NTP sync: %lu ms fa\n", millis() - lastNTPSync);
+  Serial.printf("Prossimo NTP sync tra: %lu ms\n", 3600000 - (millis() - lastNTPSync));
+  Serial.println("=================================\n");
+}
+
+// === DISPLAY ===
+// Due schermate, ridisegnate solo quando cambia qualcosa (niente refresh ogni secondo):
+//  - Home: ora HH:MM grande, data, riga di stato (WiFi, campane, temperatura)
+//  - Melodia: sfondo unico con nome melodia, "IN CORSO" e barra di avanzamento
+// Il font GLCD non ha simboli Unicode: gli indicatori sono pallini disegnati.
+
+static const uint16_t DISP_BG = 0x0841;       // quasi nero
+static const uint16_t DISP_ACCENT = 0xFD20;   // ambra/oro
+static const uint16_t DISP_DIM = 0x8410;      // grigio
+
+static bool getDisplayTime(int &hh, int &mm, int &dd, int &mo, int &yy) {
+  if (systemStatus.rtcConnected) {
+    DateTime now = rtc.now();
+    hh = now.hour(); mm = now.minute(); dd = now.day(); mo = now.month(); yy = now.year();
+    return true;
+  }
+  if (manualTimeValid) {
+    hh = manualTime.hour(); mm = manualTime.minute(); dd = manualTime.day(); mo = manualTime.month(); yy = manualTime.year();
+    return true;
+  }
+  if (systemStatus.ntpSynced) {
+    time_t now = time(nullptr);
+    struct tm *t = localtime(&now);
+    hh = t->tm_hour; mm = t->tm_min; dd = t->tm_mday; mo = t->tm_mon + 1; yy = t->tm_year + 1900;
+    return true;
+  }
+  return false;
+}
+
+static void drawStatusDot(int x, int y, uint16_t color, const char *label) {
+  tft.fillCircle(x + 4, y + 7, 4, color);
+  tft.setTextDatum(TL_DATUM);
+  tft.setTextColor(TFT_WHITE, DISP_BG);
+  tft.drawString(label, x + 12, y, 2);
+}
+
+static void drawHomeScreen(bool timeValid, int hh, int mm, int dd, int mo, int yy) {
   const int16_t W = tft.width();
   const int16_t H = tft.height();
-  
-  // === HEADER CENTRATO ===
-  tft.setTextColor(TFT_CYAN);
-  tft.setTextSize(1);
-  tft.setTextDatum(TC_DATUM); // Top-Center
-  tft.drawString("CAMPANE CHIESA", W/2, 0);
-  yield();
+  static const char *days[] = {"Dom", "Lun", "Mar", "Mer", "Gio", "Ven", "Sab"};
 
-  // === OROLOGIO GRANDE AL CENTRO ===
-  char timeStr[20];
-  char dateStr[20];
-  bool timeValid = false;
-  
-  if (systemStatus.rtcConnected) {
-     DateTime now = rtc.now();
-     snprintf(timeStr, sizeof(timeStr), "%02d:%02d:%02d", now.hour(), now.minute(), now.second());
-     snprintf(dateStr, sizeof(dateStr), "%02d/%02d/%04d", now.day(), now.month(), now.year());
-     timeValid = true;
-     Serial.printf("[DEBUG] updateDisplay() - Ora da RTC: %s, Data: %s\n", timeStr, dateStr);
-   } else if (manualTimeValid) {
-     snprintf(timeStr, sizeof(timeStr), "%02d:%02d:%02d", manualTime.hour(), manualTime.minute(), manualTime.second());
-     snprintf(dateStr, sizeof(dateStr), "%02d/%02d/%04d", manualTime.day(), manualTime.month(), manualTime.year());
-     timeValid = true;
-     Serial.printf("[DEBUG] updateDisplay() - Ora manuale: %s, Data: %s\n", timeStr, dateStr);
-   } else if (systemStatus.ntpSynced) {
-     time_t now = time(nullptr);
-     struct tm * timeinfo = localtime(&now);
-     snprintf(timeStr, sizeof(timeStr), "%02d:%02d:%02d", timeinfo->tm_hour, timeinfo->tm_min, timeinfo->tm_sec);
-     snprintf(dateStr, sizeof(dateStr), "%02d/%02d/%04d", timeinfo->tm_mday, timeinfo->tm_mon+1, timeinfo->tm_year+1900);
-     timeValid = true;
-     Serial.printf("[DEBUG] updateDisplay() - Ora da NTP: %s, Data: %s\n", timeStr, dateStr);
-  }
-  
-  // Mostra orologio grande
+  tft.fillScreen(DISP_BG);
+
+  // Intestazione
+  tft.fillRect(0, 0, W, 22, DISP_ACCENT);
+  tft.setTextColor(DISP_BG, DISP_ACCENT);
+  tft.setTextDatum(ML_DATUM);
+  tft.drawString("CAMPANE", 6, 11, 2);
   if (timeValid) {
-    // Ora grande centrata
-    tft.setTextDatum(TC_DATUM); // Top-Center
-    tft.setTextSize(3);
-    tft.setTextColor(TFT_WHITE);
-    tft.drawString(timeStr, W/2, 22);
-    yield();
+    char dateStr[20];
+    int dow = DateTime(yy, mo, dd).dayOfTheWeek();
+    snprintf(dateStr, sizeof(dateStr), "%s %02d/%02d/%04d", days[dow % 7], dd, mo, yy);
+    tft.setTextDatum(MR_DATUM);
+    tft.drawString(dateStr, W - 6, 11, 2);
+  }
 
-    // Data più piccola centrata
-    tft.setTextSize(1);
-    tft.setTextColor(TFT_CYAN);
-    tft.drawString(dateStr, W/2, 54);
-    yield();
+  // Orologio grande (font 7 = 7 segmenti, 48px)
+  tft.setTextDatum(MC_DATUM);
+  if (timeValid) {
+    char timeStr[6];
+    snprintf(timeStr, sizeof(timeStr), "%02d:%02d", hh, mm);
+    tft.setTextColor(TFT_WHITE, DISP_BG);
+    tft.drawString(timeStr, W / 2, 60, 7);
   } else {
-    tft.setTextDatum(TC_DATUM);
-    tft.setTextSize(2);
-    tft.setTextColor(TFT_RED);
-    tft.drawString("NO TIME", W/2, 30);
-    yield();
+    tft.setTextColor(TFT_RED, DISP_BG);
+    tft.drawString("ORA NON IMPOSTATA", W / 2, 60, 2);
   }
-  
-  // === INDICATORI DI STATO CON ICONE COLORATE ===
-  // Ripristina allineamento a sinistra per le righe successive
-  tft.setTextDatum(TL_DATUM); // Top-Left
-  tft.setTextSize(1);
-  int yPos = 75;
-  
-  // WiFi Status con icona
-  tft.setCursor(0, yPos);
-  if (systemStatus.wifiConnected) {
-    tft.setTextColor(TFT_GREEN);
-    tft.print("● WiFi ");
-    tft.setTextColor(TFT_WHITE);
-    tft.print(WiFi.localIP());
-  } else {
-    tft.setTextColor(TFT_YELLOW);
-    tft.print("◐ WiFi AP ");
-    tft.setTextColor(TFT_WHITE);
-    tft.print(WiFi.softAPIP());
-  }
-  yPos += 12;
-  yield();
-  
-  // RTC Status con icona
-  tft.setCursor(0, yPos);
-  if (systemStatus.rtcConnected) {
-    tft.setTextColor(TFT_GREEN);
-    tft.print("● RTC ");
-    tft.setTextColor(TFT_WHITE);
-    tft.print("Connesso");
-  } else {
-    tft.setTextColor(TFT_RED);
-    tft.print("✗ RTC ");
-    tft.setTextColor(TFT_WHITE);
-    tft.print("Non trovato");
-  }
-  yPos += 12;
-  yield();
-  
-  // Stato Campane con icona
-  tft.setCursor(0, yPos);
-  if (systemStatus.bellsEnabled) {
-    tft.setTextColor(TFT_GREEN);
-    tft.print("♪ Campane ");
-    tft.setTextColor(TFT_GREEN);
-    tft.print("ABILITATE");
-  } else {
-    tft.setTextColor(TFT_RED);
-    tft.print("♪ Campane ");
-    tft.setTextColor(TFT_RED);
-    tft.print("DISABILITATE");
-  }
-  yPos += 12;
-  yield();
-  
-  // Temperatura ESP32 con icona e colori
-  tft.setCursor(0, yPos);
-  if (systemStatus.thermalProtection) {
-    tft.setTextColor(TFT_RED);
-    tft.print("▲ ESP32 ");
-    tft.print(systemStatus.esp32Temperature, 1);
-    tft.print("°C [CRITICA!]");
-  } else if (systemStatus.temperatureWarning) {
-    tft.setTextColor(TFT_YELLOW);
-    tft.print("△ ESP32 ");
-    tft.print(systemStatus.esp32Temperature, 1);
-    tft.print("°C [ALTA]");
-  } else {
-    tft.setTextColor(TFT_GREEN);
-    tft.print("● ESP32 ");
-    tft.print(systemStatus.esp32Temperature, 1);
-    tft.print("°C [OK]");
-  }
-  yPos += 12;
-  yield();
-  
-  // Fuso orario compatto
-  tft.setCursor(0, yPos);
-  tft.setTextColor(TFT_CYAN);
-  tft.print("⏰ UTC+");
-  tft.print(utcOffsetHours);
-  tft.print(" ");
-  tft.print(isDST ? "DST" : "STD");
-  yPos += 12;
-  yield();
 
-  // Info temperatura aggiuntive se necessario
-  if (systemStatus.thermalProtection || systemStatus.temperatureWarning) {
-    tft.setCursor(0, yPos);
-    tft.setTextColor(TFT_RED);
-    if (systemStatus.thermalProtection) {
-      tft.print("⚠ PROTEZIONE TERMICA ON");
-    } else {
-      tft.print("⚠ Monitoraggio attivo");
+  // Indirizzo IP (cambia con il DHCP): serve per aprire la pagina web
+  IPAddress ip = systemStatus.wifiConnected ? WiFi.localIP() : WiFi.softAPIP();
+  tft.setTextColor(DISP_ACCENT, DISP_BG);
+  tft.drawString(ip.toString(), W / 2, 97, 2);
+
+  // Riga di stato
+  int y = H - 22;
+  tft.drawFastHLine(8, y - 6, W - 16, DISP_DIM);
+  drawStatusDot(6, y, systemStatus.wifiConnected ? TFT_GREEN : TFT_YELLOW,
+                systemStatus.wifiConnected ? "WiFi" : "AP");
+  drawStatusDot(70, y, systemStatus.bellsEnabled ? TFT_GREEN : TFT_RED,
+                systemStatus.bellsEnabled ? "Campane ON" : "Campane OFF");
+  uint16_t tColor = systemStatus.thermalProtection ? TFT_RED
+                  : systemStatus.temperatureWarning ? TFT_YELLOW : TFT_GREEN;
+  char tempStr[10];
+  snprintf(tempStr, sizeof(tempStr), "%dC", (int)systemStatus.esp32Temperature);
+  drawStatusDot(180, y, tColor, tempStr);
+}
+
+static void drawMelodyProgress(uint8_t played, uint8_t total) {
+  const int16_t W = tft.width();
+  const int x = 20, y = 108, w = W - 40, h = 10;
+  int fill = total ? (int)((long)w * played / total) : 0;
+  tft.drawRect(x - 1, y - 1, w + 2, h + 2, TFT_WHITE);
+  tft.fillRect(x, y, fill, h, TFT_WHITE);
+  tft.fillRect(x + fill, y, w - fill, h, TFT_NAVY);
+}
+
+static void drawMelodyScreen(uint8_t melodyIndex) {
+  const int16_t W = tft.width();
+  tft.fillScreen(TFT_NAVY);
+  tft.setTextDatum(MC_DATUM);
+  tft.setTextColor(DISP_ACCENT, TFT_NAVY);
+  tft.drawString("IN CORSO", W / 2, 22, 2);
+  tft.setTextColor(TFT_WHITE, TFT_NAVY);
+  const char *name = bellController.getMelodyName(melodyIndex);
+  // Font 4 (26px) se il nome entra, altrimenti font 2
+  if (tft.textWidth(name, 4) <= W - 10) {
+    tft.drawString(name, W / 2, 62, 4);
+  } else {
+    tft.drawString(name, W / 2, 62, 2);
+  }
+}
+
+void updateDisplay() {
+  // Temperatura per la riga di stato e per i controlli termici
+  systemStatus.esp32Temperature = getESP32Temperature();
+
+  static int lastMode = -1;          // 0 = home, 1 = melodia
+  static uint32_t lastSignature = 0;
+  static uint8_t lastProgress = 255;
+
+  if (bellController.isPlayingMelody()) {
+    uint8_t idx = bellController.getCurrentMelodyIndex();
+    if (lastMode != 1 || lastSignature != idx) {
+      drawMelodyScreen(idx);
+      lastMode = 1;
+      lastSignature = idx;
+      lastProgress = 255;
     }
+    uint8_t played = bellController.getCurrentNoteIndex();
+    if (played != lastProgress) {
+      drawMelodyProgress(played, (uint8_t)bellController.getMelodyNoteCount(idx));
+      lastProgress = played;
+    }
+    return;
+  }
+
+  int hh = 0, mm = 0, dd = 0, mo = 0, yy = 0;
+  bool timeValid = getDisplayTime(hh, mm, dd, mo, yy);
+
+  // Firma di tutto ciò che appare in home: si ridisegna solo se cambia
+  uint32_t sig = timeValid ? (uint32_t)(dd * 1440 + hh * 60 + mm) : 0xFFFFF;
+  sig = sig * 31 + (systemStatus.wifiConnected ? 1 : 0);
+  sig = sig * 31 + (uint32_t)(systemStatus.wifiConnected ? WiFi.localIP() : WiFi.softAPIP());
+  sig = sig * 31 + (systemStatus.bellsEnabled ? 1 : 0);
+  // Solo lo stato termico: il valore in gradi si aggiorna al cambio minuto (evita ridisegni continui)
+  sig = sig * 31 + (systemStatus.thermalProtection ? 2 : systemStatus.temperatureWarning ? 1 : 0);
+
+  if (lastMode != 0 || sig != lastSignature) {
+    drawHomeScreen(timeValid, hh, mm, dd, mo, yy);
+    lastMode = 0;
+    lastSignature = sig;
   }
 }
 

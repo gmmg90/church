@@ -1,0 +1,19 @@
+[Unit]
+Description=Pannello campane (schermo touch a tutto schermo)
+After=nginx.service systemd-user-sessions.service
+Conflicts=getty@tty1.service
+After=getty@tty1.service
+
+[Service]
+User=campane
+PAMName=login
+TTYPath=/dev/tty1
+StandardInput=tty
+StandardOutput=journal
+StandardError=journal
+ExecStart=/usr/bin/xinit /opt/campane/start-kiosk.sh -- :0 vt1 -nolisten tcp -nocursor
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

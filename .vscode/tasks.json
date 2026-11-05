@@ -4,7 +4,7 @@
 		{
 			"label": "PlatformIO Build",
 			"type": "shell",
-			"command": "pio run",
+			"command": "if (Get-Command pio -ErrorAction SilentlyContinue) { pio run } elseif (Test-Path \"$env:USERPROFILE\\.platformio\\penv\\Scripts\\pio.exe\") { & \"$env:USERPROFILE\\.platformio\\penv\\Scripts\\pio.exe\" run } else { throw \"PlatformIO (pio) non trovato nel PATH o in ~/.platformio/penv/Scripts\" }",
 			"problemMatcher": [
 				"$platformio"
 			],
@@ -13,7 +13,7 @@
 		{
 			"label": "PlatformIO Upload",
 			"type": "shell",
-			"command": "pio run --target upload",
+			"command": "if (Get-Command pio -ErrorAction SilentlyContinue) { pio run --target upload } elseif (Test-Path \"$env:USERPROFILE\\.platformio\\penv\\Scripts\\pio.exe\") { & \"$env:USERPROFILE\\.platformio\\penv\\Scripts\\pio.exe\" run --target upload } else { throw \"PlatformIO (pio) non trovato nel PATH o in ~/.platformio/penv/Scripts\" }",
 			"problemMatcher": [
 				"$platformio"
 			],
@@ -22,7 +22,7 @@
 		{
 			"label": "PlatformIO Clean",
 			"type": "shell",
-			"command": "pio run --target clean",
+			"command": "if (Get-Command pio -ErrorAction SilentlyContinue) { pio run --target clean } elseif (Test-Path \"$env:USERPROFILE\\.platformio\\penv\\Scripts\\pio.exe\") { & \"$env:USERPROFILE\\.platformio\\penv\\Scripts\\pio.exe\" run --target clean } else { throw \"PlatformIO (pio) non trovato nel PATH o in ~/.platformio/penv/Scripts\" }",
 			"problemMatcher": [
 				"$platformio"
 			],
@@ -31,7 +31,7 @@
 		{
 			"label": "PlatformIO Monitor",
 			"type": "shell",
-			"command": "pio device monitor",
+			"command": "if (Get-Command pio -ErrorAction SilentlyContinue) { pio device monitor --environment esp32dev } elseif (Test-Path \"$env:USERPROFILE\\.platformio\\penv\\Scripts\\platformio.exe\") { & \"$env:USERPROFILE\\.platformio\\penv\\Scripts\\platformio.exe\" device monitor --environment esp32dev } else { throw \"PlatformIO (pio) non trovato nel PATH o in ~/.platformio/penv/Scripts\" }",
 			"problemMatcher": [],
 			"group": "build",
 			"isBackground": true
@@ -39,12 +39,7 @@
 		{
 			"label": "Build firmware (esp32dev)",
 			"type": "shell",
-			"command": "pio",
-			"args": [
-				"run",
-				"-e",
-				"esp32dev"
-			],
+			"command": "if (Get-Command pio -ErrorAction SilentlyContinue) { pio run -e esp32dev } elseif (Test-Path \"$env:USERPROFILE\\.platformio\\penv\\Scripts\\pio.exe\") { & \"$env:USERPROFILE\\.platformio\\penv\\Scripts\\pio.exe\" run -e esp32dev } else { throw \"PlatformIO (pio) non trovato nel PATH o in ~/.platformio/penv/Scripts\" }",
 			"problemMatcher": [
 				"$gcc"
 			],
@@ -54,7 +49,7 @@
 		{
 			"label": "PlatformIO Upload FS",
 			"type": "shell",
-			"command": "pio run --target uploadfs",
+			"command": "if (Get-Command pio -ErrorAction SilentlyContinue) { pio run --target uploadfs } elseif (Test-Path \"$env:USERPROFILE\\.platformio\\penv\\Scripts\\pio.exe\") { & \"$env:USERPROFILE\\.platformio\\penv\\Scripts\\pio.exe\" run --target uploadfs } else { throw \"PlatformIO (pio) non trovato nel PATH o in ~/.platformio/penv/Scripts\" }",
 			"problemMatcher": [
 				"$platformio"
 			],
