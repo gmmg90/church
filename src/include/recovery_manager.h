@@ -36,7 +36,15 @@ public:
     
     // Controlla se il pulsante factory reset è premuto (chiamare in loop())
     void checkFactoryReset() {
-        if (digitalRead(FACTORY_RESET_PIN) == LOW) {
+        // Filtro anti-disturbo: il pin deve restare LOW per almeno 100 ms
+        static uint32_t lowSince = 0;
+        bool rawLow = digitalRead(FACTORY_RESET_PIN) == LOW;
+        if (!rawLow) {
+            lowSince = 0;
+        } else if (lowSince == 0) {
+            lowSince = millis() | 1;
+        }
+        if (rawLow && millis() - lowSince >= 100) {
             // Pulsante premuto
             if (factoryResetButtonPressStart == 0) {
                 factoryResetButtonPressStart = millis();

@@ -14,7 +14,7 @@ header h1{margin:0;font-size:1.15rem;font-weight:600}
 #clock{font-size:1.6rem;font-variant-numeric:tabular-nums;font-weight:600;color:#f6c76b}
 #clock small{display:block;font-size:.75rem;color:#ccc;font-weight:400;text-align:right}
 nav{display:flex;background:#fff;border-bottom:1px solid var(--line);position:sticky;top:0;z-index:5}
-nav button{flex:1;border:0;background:none;padding:14px 8px;font-size:1rem;cursor:pointer;color:var(--muted);border-bottom:3px solid transparent}
+nav button{flex:1;border:0;border-radius:0;background:none;padding:14px 8px;font-size:1rem;cursor:pointer;color:var(--muted);border-bottom:3px solid transparent}
 nav button.on{color:var(--text);border-bottom-color:var(--accent);font-weight:600}
 main{max-width:760px;margin:0 auto;padding:16px}
 section{display:none}section.on{display:block}
@@ -22,12 +22,13 @@ section{display:none}section.on{display:block}
 .card h2{margin:0 0 12px;font-size:1.05rem}
 .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:10px}
-button,.btn{font:inherit;border:1px solid var(--line);background:#fff;border-radius:8px;padding:10px 14px;cursor:pointer}
+button,.btn{font:inherit;border:1px solid var(--line);background:#fff;border-radius:8px;padding:10px 14px;cursor:pointer;color:inherit;text-decoration:none;display:inline-block}
 button:hover{border-color:var(--accent)}
+button:disabled{opacity:.55;cursor:wait}
 .primary{background:var(--accent);border-color:var(--accent);color:#fff}
 .danger{background:var(--bad);border-color:var(--bad);color:#fff}
 .big{padding:16px;font-size:1.05rem;font-weight:600;width:100%}
-input,select{font:inherit;padding:9px 10px;border:1px solid var(--line);border-radius:8px;background:#fff;min-width:0}
+input,select{font:inherit;padding:9px 10px;border:1px solid var(--line);border-radius:8px;background:#fff;min-width:0;color:inherit}
 label{font-size:.9rem;color:var(--muted)}
 .muted{color:var(--muted);font-size:.9rem}
 .dot{display:inline-block;width:10px;height:10px;border-radius:50%;background:#bbb;margin-right:6px}
@@ -38,18 +39,40 @@ label{font-size:.9rem;color:var(--muted)}
 #playing b{font-size:1.1rem}
 .switch{display:flex;align-items:center;gap:12px;font-size:1rem;color:var(--text);cursor:pointer}
 .switch input{width:22px;height:22px;accent-color:var(--accent)}
-.item{display:grid;grid-template-columns:1.2fr 1fr 1fr 1.3fr auto auto;gap:8px;align-items:center;padding:8px 0;border-top:1px solid var(--line)}
-.item:first-child{border-top:0}
-.ev{grid-template-columns:1.4fr 1.2fr 1fr 1.2fr 1.2fr auto auto auto}
 .note{display:grid;grid-template-columns:auto 1fr 1fr 1fr auto;gap:6px;align-items:center;margin-bottom:6px}
 .note span{color:var(--muted);font-size:.85rem;width:2.2em}
 details summary{cursor:pointer;font-weight:600;padding:4px 0}
-#toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);background:#2b2b2b;color:#fff;padding:12px 18px;border-radius:8px;opacity:0;transition:opacity .2s;pointer-events:none;max-width:90%}
+/* Programmazione */
+.form{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px}
+.form label{display:flex;flex-direction:column;gap:5px}
+.days{display:flex;gap:6px;flex-wrap:wrap;margin-top:12px}
+.chip{padding:9px 13px;border-radius:999px;border:1px solid var(--line);background:#fff;cursor:pointer;user-select:none;font-size:.95rem}
+.chip.on{background:var(--accent);border-color:var(--accent);color:#fff}
+.quick{margin-top:8px;font-size:.85rem}
+.quick a{color:var(--accent);cursor:pointer;margin-right:14px;text-decoration:underline}
+.sched{display:flex;align-items:center;gap:12px;padding:12px 0;border-top:1px solid var(--line)}
+.sched:first-child{border-top:0}
+.sched .t{font-size:1.35rem;font-weight:600;font-variant-numeric:tabular-nums;min-width:3.4em}
+.sched .info{flex:1;min-width:0}
+.sched .info b{display:block;overflow-wrap:anywhere}
+.sched .d{color:var(--muted);font-size:.88rem}
+.sched.off .t,.sched.off .info{opacity:.45}
+.sched .acts{display:flex;gap:6px;align-items:center}
+.sched .acts button{padding:8px 10px}
+.tag{display:inline-block;font-size:.75rem;padding:1px 7px;border-radius:999px;background:#f1e6d1;color:#7a5212;margin-left:6px;vertical-align:middle}
+.bad-text{color:var(--bad)}
+#nextRing{font-size:1.05rem}
+.editing{outline:2px solid var(--accent);outline-offset:2px}
+#toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);background:#2b2b2b;color:#fff;padding:12px 18px;border-radius:8px;opacity:0;transition:opacity .2s;pointer-events:none;max-width:90%;z-index:10}
 #toast.on{opacity:1}#toast.err{background:var(--bad)}
-@media(max-width:600px){.item,.ev{grid-template-columns:1fr 1fr}.item>*:first-child,.ev>*:first-child{grid-column:1/-1}}
+#netbar{display:none;position:fixed;top:0;left:0;right:0;height:3px;background:var(--accent);z-index:20;animation:load 1s linear infinite;transform-origin:left}
+#netbar.on{display:block}
+@keyframes load{0%{transform:scaleX(.1)}50%{transform:scaleX(.6)}100%{transform:scaleX(1);opacity:.3}}
+@media(max-width:600px){.sched{gap:8px}.sched .t{font-size:1.1rem;min-width:2.8em}.sched .acts{gap:4px}.sched .acts button{padding:7px 8px}.note{grid-template-columns:auto 1fr 1fr}.note span{display:none}}
 </style>
 </head>
 <body>
+<div id="netbar"></div>
 <header>
   <h1>🔔 Campane Chiesa</h1>
   <div id="clock">--:--<small id="date">--</small></div>
@@ -63,7 +86,7 @@ details summary{cursor:pointer;font-weight:600;padding:4px 0}
 
 <!-- ============ CAMPANE ============ -->
 <section id="campane" class="on">
-  <div id="playing"><div>In corso: <b id="playingName"></b></div><button class="danger" onclick="stopMelody()">⏹ Ferma</button></div>
+  <div id="playing"><div>In corso: <b id="playingName"></b></div><button class="danger" onclick="stopMelody(this)">⏹ Ferma</button></div>
 
   <div class="card">
     <label class="switch"><input type="checkbox" id="bellsToggle"> <span id="bellsLabel">Campane abilitate</span></label>
@@ -74,9 +97,9 @@ details summary{cursor:pointer;font-weight:600;padding:4px 0}
     <h2>Suona ora</h2>
     <div class="grid" id="melodyButtons"><span class="muted">Caricamento...</span></div>
     <div class="row" style="margin-top:12px">
-      <button onclick="stopMelody()">⏹ Ferma</button>
-      <button onclick="testBell(1)">🔔 Colpo campana 1</button>
-      <button onclick="testBell(2)">🔔 Colpo campana 2</button>
+      <button onclick="stopMelody(this)">⏹ Ferma</button>
+      <button onclick="testBell(1,this)">🔔 Colpo campana 1</button>
+      <button onclick="testBell(2,this)">🔔 Colpo campana 2</button>
     </div>
   </div>
 
@@ -101,10 +124,10 @@ details summary{cursor:pointer;font-weight:600;padding:4px 0}
         <div id="notes"></div>
         <div class="row">
           <button onclick="addNote()">➕ Colpo</button>
-          <button onclick="testEdited()">▶ Prova</button>
-          <button class="primary" onclick="saveMelody(false)">💾 Salva</button>
-          <button onclick="saveMelody(true)">Salva come nuova</button>
-          <button class="danger" onclick="deleteMelody()">Elimina</button>
+          <button onclick="testEdited(this)">▶ Prova</button>
+          <button class="primary" onclick="saveMelody(false,this)">💾 Salva</button>
+          <button onclick="saveMelody(true,this)">Salva come nuova</button>
+          <button class="danger" onclick="deleteMelody(this)">Elimina</button>
         </div>
       </div>
     </details>
@@ -114,31 +137,54 @@ details summary{cursor:pointer;font-weight:600;padding:4px 0}
 <!-- ============ PROGRAMMAZIONE ============ -->
 <section id="programma">
   <div class="card">
+    <div class="muted">Prossima campana</div>
+    <div id="nextRing">--</div>
+    <div id="bellsOffWarn" class="bad-text" style="display:none;margin-top:6px">⚠️ Le campane sono disabilitate: le programmazioni non suoneranno.</div>
+  </div>
+
+  <div class="card" id="wForm">
+    <h2 id="wTitle">➕ Nuova programmazione settimanale</h2>
+    <div class="form">
+      <label>Melodia<select id="wMelody" class="melodySelect"></select></label>
+      <label>Ora<input type="time" id="wTime" value="12:00" required></label>
+      <label>Nome (facoltativo)<input id="wName" maxlength="31" placeholder="es. Angelus"></label>
+    </div>
+    <div class="days" id="wDays"></div>
+    <div class="quick">
+      <a onclick="setDays([1,2,3,4,5,6,0])">Tutti i giorni</a>
+      <a onclick="setDays([1,2,3,4,5,6])">Lun–Sab</a>
+      <a onclick="setDays([0])">Solo domenica</a>
+      <a onclick="setDays([])">Nessuno</a>
+    </div>
+    <div class="row" style="margin-top:14px">
+      <button class="primary" id="wSave" onclick="saveWeeklyForm(this)">Aggiungi</button>
+      <button id="wCancel" onclick="resetWeeklyForm()" style="display:none">Annulla</button>
+    </div>
+  </div>
+
+  <div class="card">
     <h2>Ogni settimana</h2>
-    <div id="weekly"></div>
-    <details style="margin-top:12px">
-      <summary>➕ Aggiungi</summary>
-      <div style="margin-top:10px">
-        <div class="row" id="addDays"></div>
-        <div class="row" style="margin-top:10px">
-          <input id="addName" placeholder="Nome (es. Messa)">
-          <input type="time" id="addTime" value="18:00">
-          <select id="addMelody" class="melodySelect"></select>
-          <button onclick="addWeekly()">Aggiungi</button>
-        </div>
-      </div>
-    </details>
-    <div class="row" style="margin-top:12px"><button class="primary" onclick="saveWeekly()">💾 Salva programmazione</button></div>
+    <div id="weekly"><span class="muted">Caricamento...</span></div>
+  </div>
+
+  <div class="card" id="sForm">
+    <h2 id="sTitle">➕ Nuova data speciale</h2>
+    <div class="form">
+      <label>Data<input type="date" id="sDate"></label>
+      <label>Ora<input type="time" id="sTime" value="11:00"></label>
+      <label>Melodia<select id="sMelody" class="melodySelect"></select></label>
+      <label>Nome (facoltativo)<input id="sName" maxlength="31" placeholder="es. Matrimonio Rossi"></label>
+    </div>
+    <label class="switch" style="margin-top:12px"><input type="checkbox" id="sYearly"> Ripeti ogni anno (es. Natale)</label>
+    <div class="row" style="margin-top:14px">
+      <button class="primary" id="sSave" onclick="saveSpecialForm(this)">Aggiungi</button>
+      <button id="sCancel" onclick="resetSpecialForm()" style="display:none">Annulla</button>
+    </div>
   </div>
 
   <div class="card">
     <h2>Date speciali</h2>
-    <div id="special"></div>
-    <div class="row" style="margin-top:12px">
-      <button onclick="addSpecial()">➕ Aggiungi data</button>
-      <button class="primary" onclick="saveSpecial()">💾 Salva date</button>
-    </div>
-    <p class="muted">"Ogni anno" = si ripete alla stessa data (Natale, Pasqua...).</p>
+    <div id="special"><span class="muted">Caricamento...</span></div>
   </div>
 </section>
 
@@ -148,8 +194,8 @@ details summary{cursor:pointer;font-weight:600;padding:4px 0}
     <h2>Ora</h2>
     <div class="row">
       <input type="datetime-local" id="dateTime">
-      <button onclick="setTime()">Imposta</button>
-      <button onclick="syncNtp()">Sincronizza da Internet</button>
+      <button onclick="setTime(this)">Imposta</button>
+      <button onclick="syncNtp(this)">Sincronizza da Internet</button>
     </div>
   </div>
 
@@ -159,11 +205,11 @@ details summary{cursor:pointer;font-weight:600;padding:4px 0}
     <div id="tgUsers" class="muted"></div>
     <div class="row" style="margin-top:10px">
       <input id="tgNew" placeholder="Chat ID" inputmode="numeric">
-      <button onclick="tgAdd()">Aggiungi utente</button>
+      <button onclick="tgAdd(this)">Aggiungi utente</button>
     </div>
     <div class="row" style="margin-top:10px">
-      <button onclick="tgToggle()" id="tgToggleBtn">Abilita/Disabilita</button>
-      <button onclick="tgTest()">Invia messaggio di prova</button>
+      <button onclick="tgToggle(this)">Abilita/Disabilita</button>
+      <button onclick="tgTest(this)">Invia messaggio di prova</button>
     </div>
     <p class="muted">Il Chat ID si ottiene scrivendo /start al bot.</p>
   </div>
@@ -173,7 +219,7 @@ details summary{cursor:pointer;font-weight:600;padding:4px 0}
     <div class="row">
       <input id="ssid" placeholder="Nome rete">
       <input id="pass" type="password" placeholder="Password">
-      <button onclick="saveWifi()">Salva e riavvia</button>
+      <button onclick="saveWifi(this)">Salva e riavvia</button>
     </div>
     <details style="margin-top:12px">
       <summary>Indirizzo IP</summary>
@@ -184,7 +230,7 @@ details summary{cursor:pointer;font-weight:600;padding:4px 0}
           <input id="dns1" placeholder="DNS 1"><input id="dns2" placeholder="DNS 2">
         </div>
         <p class="muted" id="netNow"></p>
-        <button onclick="saveNet()">Salva (vale dal prossimo riavvio)</button>
+        <button onclick="saveNet(this)">Salva (vale dal prossimo riavvio)</button>
       </div>
     </details>
   </div>
@@ -192,9 +238,9 @@ details summary{cursor:pointer;font-weight:600;padding:4px 0}
   <div class="card">
     <h2>Backup</h2>
     <div class="row">
-      <button onclick="backup()">⬇ Scarica backup</button>
+      <button onclick="backup(this)">⬇ Scarica backup</button>
       <input type="file" id="restoreFile" accept=".json">
-      <button onclick="restore()">Ripristina</button>
+      <button onclick="restore(this)">Ripristina</button>
     </div>
   </div>
 
@@ -209,92 +255,128 @@ details summary{cursor:pointer;font-weight:600;padding:4px 0}
 
 <script>
 const DAYS = ['Domenica','Lunedì','Martedì','Mercoledì','Giovedì','Venerdì','Sabato'];
-const TYPES = ['Messa','Angelus','Matrimonio','Funerale','Festa','Altro'];
+const SHORT = ['Dom','Lun','Mar','Mer','Gio','Ven','Sab'];
+const WEEK_ORDER = [1,2,3,4,5,6,0];
+const MAX_WEEKLY = 64, MAX_SPECIAL = 10;
 let melodies = [], weekly = [], special = [], status = {};
 
 const $ = id => document.getElementById(id);
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const pad = n => String(n).padStart(2, '0');
+const hm = (h, m) => pad(h) + ':' + pad(m);
 
 function toast(msg, err) {
   const t = $('toast'); t.textContent = msg; t.className = 'on' + (err ? ' err' : '');
-  clearTimeout(t._h); t._h = setTimeout(() => t.className = '', 3500);
+  clearTimeout(t._h); t._h = setTimeout(() => t.className = '', err ? 5000 : 2500);
 }
 
-async function api(url, body, method) {
-  const opt = body === undefined ? { method: method || 'GET' }
-    : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: typeof body === 'string' ? body : JSON.stringify(body) };
-  for (let i = 0; i < 3; i++) {
-    const r = await fetch(url, opt);
-    if (r.status === 429) { await new Promise(res => setTimeout(res, 400)); continue; }
-    if (!r.ok) throw new Error('HTTP ' + r.status);
-    const ct = r.headers.get('content-type') || '';
-    return ct.includes('json') ? r.json() : r.text();
-  }
-  throw new Error('Dispositivo occupato, riprova');
+// ---------- Rete: le richieste partono UNA alla volta ----------
+// L'ESP32 gestisce male più connessioni insieme (risposte perse o lente):
+// metterle in fila rende la pagina più veloce e affidabile.
+let queue = Promise.resolve(), pending = 0;
+function api(url, body) {
+  pending++; $('netbar').classList.add('on');
+  const run = () => request(url, body);
+  const p = queue.then(run, run);
+  queue = p.catch(() => {});
+  return p.finally(() => { if (--pending === 0) $('netbar').classList.remove('on'); });
 }
-async function act(promise, okMsg) {
-  try { const r = await promise; if (r && r.success === false) throw new Error(r.message || 'errore'); if (okMsg) toast(okMsg); return r; }
-  catch (e) { toast('Errore: ' + e.message, true); }
+async function request(url, body) {
+  const isGet = body === undefined;
+  const opt = isGet ? {} : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: typeof body === 'string' ? body : JSON.stringify(body) };
+  for (let attempt = 0; ; attempt++) {
+    const ctrl = new AbortController(), timer = setTimeout(() => ctrl.abort(), 12000);
+    try {
+      const r = await fetch(url, { ...opt, signal: ctrl.signal });
+      if (!r.ok) {
+        let msg = 'HTTP ' + r.status;
+        try { const j = await r.json(); if (j.message) msg = j.message; } catch (e) {}
+        throw new Error(msg);
+      }
+      const ct = r.headers.get('content-type') || '';
+      return ct.includes('json') ? await r.json() : await r.text();
+    } catch (e) {
+      // Si riprova solo una lettura (GET) fallita per rete: un comando non va ripetuto
+      const netErr = e.name === 'AbortError' || e instanceof TypeError;
+      if (!isGet || !netErr || attempt >= 1) throw new Error(e.name === 'AbortError' ? 'nessuna risposta dal dispositivo' : e.message);
+    } finally { clearTimeout(timer); }
+  }
+}
+// Esegue un'azione con il pulsante disabilitato mentre aspetta
+async function act(btn, promise, okMsg) {
+  if (btn) btn.disabled = true;
+  try {
+    const r = await promise;
+    if (r && r.success === false) throw new Error(r.message || 'errore');
+    if (okMsg) toast(okMsg);
+    return r ?? true;
+  } catch (e) { toast('Errore: ' + e.message, true); return null; }
+  finally { if (btn) btn.disabled = false; }
 }
 
 // ---------- Schede ----------
 document.querySelectorAll('nav button').forEach(b => b.onclick = () => {
   document.querySelectorAll('nav button, section').forEach(x => x.classList.remove('on'));
   b.classList.add('on'); $(b.dataset.tab).classList.add('on');
-  if (b.dataset.tab === 'impostazioni') { loadTelegram(); loadNet(); }
+  if (b.dataset.tab === 'impostazioni' && !b._loaded) { b._loaded = true; loadTelegram(); loadNet(); }
+  if (b.dataset.tab === 'programma') renderNext();
 });
 
-// ---------- Orologio: si sincronizza ogni minuto e avanza da solo ----------
-let clockBase = null, clockAt = 0;
-async function syncClock() {
-  try {
-    const t = await api('/api/time');
-    const [h, m, s] = (t.time || '0:0:0').split(':').map(Number);
-    clockBase = h * 3600 + m * 60 + (s || 0); clockAt = Date.now();
-    $('date').textContent = t.date || '';
-  } catch (e) {}
+// ---------- Orologio del dispositivo: sincronizzato ogni 5 minuti, avanza da solo ----------
+let clock = null; // { date: Date (ora del dispositivo), at: Date.now() }
+function setClock(t) {
+  if (!t || t.year === undefined) return;
+  clock = { date: new Date(t.year, t.month - 1, t.day, t.hour, t.min, t.sec || 0), at: Date.now() };
+  $('date').textContent = t.date || '';
 }
+const deviceNow = () => clock ? new Date(clock.date.getTime() + Date.now() - clock.at) : null;
 function tickClock() {
-  if (clockBase === null) return;
-  const sec = Math.floor(clockBase + (Date.now() - clockAt) / 1000) % 86400;
-  $('clock').firstChild.textContent = pad(Math.floor(sec / 3600)) + ':' + pad(Math.floor(sec / 60) % 60);
+  const n = deviceNow(); if (!n) return;
+  $('clock').firstChild.textContent = hm(n.getHours(), n.getMinutes());
 }
+async function syncClock() { try { setClock(await api('/api/time')); } catch (e) {} }
 
 // ---------- Stato ----------
-async function loadStatus() {
-  try { status = await api('/api/status'); } catch (e) { return; }
-  $('bellsToggle').checked = !!status.bellsEnabled;
-  $('bellsLabel').textContent = status.bellsEnabled ? 'Campane abilitate' : 'Campane DISABILITATE';
-  $('playing').classList.toggle('on', !!status.isPlaying);
-  $('playingName').textContent = status.playingName || '';
-  $('dWifi').className = 'dot ' + (status.wifiConnected ? 'ok' : 'bad');
-  $('dTime').className = 'dot ' + (status.ntpSynced || status.rtcConnected ? 'ok' : 'bad');
-  $('dTemp').className = 'dot ' + (status.thermalProtection ? 'bad' : status.temperatureWarning ? 'warn' : 'ok');
-  $('temp').textContent = status.esp32Temperature !== undefined ? status.esp32Temperature.toFixed(0) + '°C' : '--';
-  const min = Math.floor((status.uptimeMs || 0) / 60000);
+function applyStatus(s) {
+  if (!s) return; status = s;
+  $('bellsToggle').checked = !!s.bellsEnabled;
+  $('bellsLabel').textContent = s.bellsEnabled ? 'Campane abilitate' : 'Campane DISABILITATE';
+  $('bellsOffWarn').style.display = s.bellsEnabled ? 'none' : 'block';
+  $('playing').classList.toggle('on', !!s.isPlaying);
+  $('playingName').textContent = s.playingName || '';
+  $('dWifi').className = 'dot ' + (s.wifiConnected ? 'ok' : 'bad');
+  $('dTime').className = 'dot ' + (s.ntpSynced || s.rtcConnected ? 'ok' : 'bad');
+  $('dTemp').className = 'dot ' + (s.thermalProtection ? 'bad' : s.temperatureWarning ? 'warn' : 'ok');
+  $('temp').textContent = typeof s.esp32Temperature === 'number' ? s.esp32Temperature.toFixed(0) + '°C' : '--';
+  const min = Math.floor((s.uptimeMs || 0) / 60000);
   $('uptime').textContent = 'acceso da ' + (min >= 1440 ? Math.floor(min / 1440) + 'g ' : '') + Math.floor(min / 60) % 24 + 'h ' + min % 60 + 'm';
-  $('sysInfo').textContent = 'Firmware ' + (status.firmwareVersion || '?') + ' · ' + (status.timezoneDescription || '');
+  $('sysInfo').textContent = 'Firmware ' + (s.firmwareVersion || '?') + ' · ' + (s.timezoneDescription || '');
 }
+async function loadStatus() { try { applyStatus(await api('/api/status')); } catch (e) {} }
 $('bellsToggle').onchange = async function () {
   if (!this.checked && !confirm('Disabilitare le campane? Le programmazioni non suoneranno.')) { this.checked = true; return; }
-  await act(api('/api/toggle-bells', { enabled: this.checked }), this.checked ? 'Campane abilitate' : 'Campane disabilitate');
-  loadStatus();
+  const on = this.checked;
+  if (await act(this, api('/api/toggle-bells', { enabled: on }), on ? 'Campane abilitate' : 'Campane disabilitate')) {
+    status.bellsEnabled = on; applyStatus(status);
+  } else this.checked = !on;
 };
 
 // ---------- Melodie ----------
-async function loadMelodies() {
+const melodyName = id => { const m = melodies.find(x => x.id == id); return m ? m.name : null; };
+function applyMelodies(list) {
   // "Test" è lo slot temporaneo usato da "Prova": non va mostrato né programmato
-  try { melodies = ((await api('/api/melodies')).melodies || []).filter(m => m.name !== 'Test'); } catch (e) { return; }
+  melodies = (list || []).filter(m => m.name !== 'Test');
   $('melodyButtons').innerHTML = melodies.length ? melodies.map(m =>
-    `<button class="big" onclick="play(${m.id})">▶ ${esc(m.name)}</button>`).join('') : '<span class="muted">Nessuna melodia</span>';
+    `<button class="big" onclick="play(${m.id},this)">▶ ${esc(m.name)}</button>`).join('') : '<span class="muted">Nessuna melodia</span>';
   const opts = melodies.map(m => `<option value="${m.id}">${esc(m.name)}</option>`).join('');
-  document.querySelectorAll('.melodySelect').forEach(s => s.innerHTML = opts);
-  $('edSelect').innerHTML = '<option value="">— nuova —</option>' + opts;
+  document.querySelectorAll('.melodySelect').forEach(s => { const v = s.value; s.innerHTML = opts; if (v !== '') s.value = v; });
+  const ed = $('edSelect').value;
+  $('edSelect').innerHTML = '<option value="">— nuova —</option>' + opts; $('edSelect').value = ed;
 }
-async function play(id) { await act(api('/api/test-melody', { melodyId: id }), 'Avviata'); setTimeout(loadStatus, 500); }
-async function stopMelody() { await act(api('/api/stop-melody', '{}'), 'Fermata'); setTimeout(loadStatus, 300); }
-async function testBell(n) { await act(api('/api/test-relay?relay=' + n + '&duration=200'), 'Colpo campana ' + n); }
+async function loadMelodies() { try { applyMelodies((await api('/api/melodies')).melodies); renderWeekly(); renderSpecial(); } catch (e) {} }
+async function play(id, btn) { if (await act(btn, api('/api/test-melody', { melodyId: id }), 'Avviata')) setTimeout(loadStatus, 600); }
+async function stopMelody(btn) { if (await act(btn, api('/api/stop-melody', '{}'), 'Fermata')) setTimeout(loadStatus, 300); }
+async function testBell(n, btn) { await act(btn, api('/api/test-relay?relay=' + n + '&duration=200'), 'Colpo campana ' + n); }
 
 function addNote(b = 1, d = 200, p = 500) {
   const div = document.createElement('div'); div.className = 'note';
@@ -321,97 +403,215 @@ async function loadMelody(id) {
     (m.notes || []).forEach(n => addNote(n.bellNumber, n.duration, n.delay));
   } catch (e) { toast('Errore caricamento melodia', true); }
 }
-async function testEdited() {
+async function testEdited(btn) {
   const notes = collectNotes();
   if (!notes.length) return toast('Aggiungi almeno un colpo', true);
-  await act(api('/api/test-melody', { notes }), 'Prova avviata');
+  await act(btn, api('/api/test-melody', { notes }), 'Prova avviata');
 }
-async function saveMelody(asNew) {
+async function saveMelody(asNew, btn) {
   const notes = collectNotes(), name = $('edName').value.trim() || 'Senza nome', id = $('edSelect').value;
   if (!notes.length) return toast('Aggiungi almeno un colpo', true);
   if (!asNew && id === '') asNew = true;
-  await act(asNew ? api('/api/save-melody', { name, notes }) : api('/api/update-melody', { index: +id, name, notes }), 'Melodia salvata');
-  loadMelodies();
+  if (await act(btn, asNew ? api('/api/save-melody', { name, notes }) : api('/api/update-melody', { index: +id, name, notes }), 'Melodia salvata')) loadMelodies();
 }
-async function deleteMelody() {
+async function deleteMelody(btn) {
   const id = $('edSelect').value;
-  if (id === '' || !confirm('Eliminare questa melodia?')) return;
-  await act(api('/api/delete-melody', { index: +id }), 'Melodia eliminata');
-  $('notes').innerHTML = ''; $('edName').value = ''; loadMelodies();
+  if (id === '') return;
+  const used = weekly.some(s => s.melodyIndex == id) || special.some(e => e.melodyIndex == id);
+  if (!confirm(used ? 'Questa melodia è usata in una programmazione, che smetterà di suonare. Eliminarla?' : 'Eliminare questa melodia?')) return;
+  if (await act(btn, api('/api/delete-melody', { index: +id }), 'Melodia eliminata')) {
+    $('notes').innerHTML = ''; $('edName').value = ''; $('edSelect').value = ''; loadMelodies();
+  }
 }
 
 // ---------- Programmazione settimanale ----------
-const melodyOpts = sel => melodies.map(m => `<option value="${m.id}"${m.id == sel ? ' selected' : ''}>${esc(m.name)}</option>`).join('');
-function renderWeekly() {
-  weekly.sort((a, b) => a.dayOfWeek - b.dayOfWeek || a.hour - b.hour || a.minute - b.minute);
-  $('weekly').innerHTML = weekly.length ? weekly.map((s, i) => `<div class="item" data-i="${i}">
-    <input data-f="name" value="${esc(s.name)}" placeholder="Nome">
-    <select data-f="dayOfWeek">${DAYS.map((d, n) => `<option value="${n}"${n == s.dayOfWeek ? ' selected' : ''}>${d}</option>`).join('')}</select>
-    <input type="time" data-f="time" value="${pad(s.hour)}:${pad(s.minute)}">
-    <select data-f="melodyIndex">${melodyOpts(s.melodyIndex)}</select>
-    <label class="switch"><input type="checkbox" data-f="isActive"${s.isActive ? ' checked' : ''}> attiva</label>
-    <button onclick="readWeekly();weekly.splice(${i},1);renderWeekly()">✕</button></div>`).join('')
-    : '<p class="muted">Nessuna programmazione</p>';
-}
-function readRows(container, list) {
-  container.querySelectorAll('[data-i]').forEach(row => {
-    const o = list[+row.dataset.i];
-    row.querySelectorAll('[data-f]').forEach(f => {
-      const k = f.dataset.f;
-      if (k === 'time') { const [h, m] = f.value.split(':'); o.hour = +h || 0; o.minute = +m || 0; }
-      else if (k === 'date') { const [y, mo, d] = f.value.split('-'); o.year = +y; o.month = +mo; o.day = +d; }
-      else if (f.type === 'checkbox') o[k] = f.checked;
-      else if (f.tagName === 'SELECT') o[k] = +f.value;
-      else o[k] = f.value;
-    });
+// Sul dispositivo ogni giorno è una riga separata; qui le righe con stessa ora,
+// melodia e nome sono mostrate come UNA programmazione con più giorni.
+const wKey = s => [s.hour, s.minute, s.melodyIndex, s.name, s.isActive ? 1 : 0].join('|');
+function weeklyGroups() {
+  const map = new Map();
+  weekly.forEach(s => {
+    const k = wKey(s);
+    if (!map.has(k)) map.set(k, { key: k, name: s.name, hour: s.hour, minute: s.minute, melodyIndex: s.melodyIndex, isActive: s.isActive, days: [] });
+    map.get(k).days.push(+s.dayOfWeek);
   });
+  return [...map.values()].sort((a, b) => a.hour * 60 + a.minute - (b.hour * 60 + b.minute) || String(a.name).localeCompare(b.name));
 }
-const readWeekly = () => readRows($('weekly'), weekly);
-async function loadWeekly() { try { weekly = (await api('/api/weekly-schedules')).schedules || []; } catch (e) {} renderWeekly(); }
-function addWeekly() {
-  readWeekly();
-  const days = [...document.querySelectorAll('#addDays input:checked')].map(c => +c.value);
-  const [h, m] = $('addTime').value.split(':').map(Number);
+function daysText(days) {
+  const set = new Set(days);
+  if (set.size === 7) return 'Tutti i giorni';
+  if (set.size === 6 && !set.has(0)) return 'Lunedì–Sabato';
+  if (set.size === 5 && !set.has(0) && !set.has(6)) return 'Lunedì–Venerdì';
+  return WEEK_ORDER.filter(d => set.has(d)).map(d => set.size === 1 ? DAYS[d] : SHORT[d]).join(' ');
+}
+function melodyLabel(id) {
+  const n = melodyName(id);
+  return n ? esc(n) : `<span class="bad-text">melodia ${+id + 1} mancante</span>`;
+}
+let shownWeekly = [], shownSpecial = [];
+function renderWeekly() {
+  const g = shownWeekly = weeklyGroups();
+  $('weekly').innerHTML = g.length ? g.map((x, i) => `<div class="sched${x.isActive ? '' : ' off'}">
+      <div class="t">${hm(x.hour, x.minute)}</div>
+      <div class="info"><b>${melodyLabel(x.melodyIndex)}${x.name ? '<span class="tag">' + esc(x.name) + '</span>' : ''}</b>
+        <div class="d">${daysText(x.days)}${x.isActive ? '' : ' · in pausa'}</div></div>
+      <div class="acts">
+        <button title="${x.isActive ? 'Metti in pausa' : 'Riattiva'}" onclick="toggleWeekly(shownWeekly[${i}].key,this)">${x.isActive ? '⏸' : '▶'}</button>
+        <button title="Modifica" onclick="editWeekly(shownWeekly[${i}].key)">✏️</button>
+        <button title="Elimina" onclick="deleteWeekly(shownWeekly[${i}].key,this)">🗑</button>
+      </div></div>`).join('')
+    : '<p class="muted">Nessuna programmazione. Aggiungila con il modulo qui sopra.</p>';
+  renderNext();
+}
+$('wDays').innerHTML = WEEK_ORDER.map(d => `<span class="chip" data-d="${d}" onclick="this.classList.toggle('on')">${SHORT[d]}</span>`).join('');
+const getDays = () => [...document.querySelectorAll('#wDays .chip.on')].map(c => +c.dataset.d);
+function setDays(days) { document.querySelectorAll('#wDays .chip').forEach(c => c.classList.toggle('on', days.includes(+c.dataset.d))); }
+
+let editingKey = null;
+function resetWeeklyForm() {
+  editingKey = null; setDays([]); $('wName').value = '';
+  $('wTitle').textContent = '➕ Nuova programmazione settimanale';
+  $('wSave').textContent = 'Aggiungi'; $('wCancel').style.display = 'none'; $('wForm').classList.remove('editing');
+}
+function editWeekly(key) {
+  const g = weeklyGroups().find(x => x.key === key); if (!g) return;
+  editingKey = key;
+  $('wTime').value = hm(g.hour, g.minute); $('wMelody').value = g.melodyIndex; $('wName').value = g.name || ''; setDays(g.days);
+  $('wTitle').textContent = '✏️ Modifica programmazione';
+  $('wSave').textContent = 'Salva modifiche'; $('wCancel').style.display = ''; $('wForm').classList.add('editing');
+  $('wForm').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+// Salva l'elenco completo sul dispositivo; se fallisce ripristina quello di prima
+async function persistWeekly(next, btn, okMsg) {
+  const res = await act(btn, api('/api/weekly-schedules', { schedules: next }), okMsg);
+  if (res) { weekly = next; renderWeekly(); return true; }
+  return false;
+}
+async function saveWeeklyForm(btn) {
+  const days = getDays(), time = $('wTime').value, mel = $('wMelody').value;
+  if (!time) return toast("Inserisci l'ora", true);
+  if (mel === '') return toast('Scegli una melodia', true);
   if (!days.length) return toast('Scegli almeno un giorno', true);
-  const name = $('addName').value.trim() || 'Programmazione';
-  days.forEach(d => weekly.push({ id: Date.now() + d, name, dayOfWeek: d, hour: h || 0, minute: m || 0, melodyIndex: +$('addMelody').value || 0, isActive: true }));
-  renderWeekly(); toast('Aggiunte ' + days.length + ' righe: ricordati di salvare');
+  const [h, m] = time.split(':').map(Number), name = $('wName').value.trim();
+  const old = editingKey ? weekly.filter(s => wKey(s) === editingKey) : [];
+  const rest = weekly.filter(s => !old.includes(s));
+  const clash = days.filter(d => rest.some(s => +s.dayOfWeek === d && s.hour === h && s.minute === m));
+  if (clash.length) return toast('C\'è già una programmazione alle ' + hm(h, m) + ' di ' + clash.map(d => DAYS[d]).join(', '), true);
+  if (rest.length + days.length > MAX_WEEKLY) return toast('Troppe programmazioni (massimo ' + MAX_WEEKLY + ' giorni in totale)', true);
+  const active = old.length ? old[0].isActive : true;
+  const next = rest.concat(days.map(d => ({ name, dayOfWeek: d, hour: h, minute: m, melodyIndex: +mel, isActive: active })));
+  if (await persistWeekly(next, btn, editingKey ? 'Modifica salvata' : 'Programmazione aggiunta')) resetWeeklyForm();
 }
-async function saveWeekly() { readWeekly(); await act(api('/api/weekly-schedules', { schedules: weekly }), 'Programmazione salvata'); }
+async function toggleWeekly(key, btn) {
+  const next = weekly.map(s => wKey(s) === key ? { ...s, isActive: !s.isActive } : s);
+  await persistWeekly(next, btn, 'Salvato');
+}
+async function deleteWeekly(key, btn) {
+  const g = weeklyGroups().find(x => x.key === key); if (!g) return;
+  if (!confirm('Eliminare ' + hm(g.hour, g.minute) + ' – ' + (melodyName(g.melodyIndex) || 'melodia') + ' (' + daysText(g.days) + ')?')) return;
+  if (await persistWeekly(weekly.filter(s => wKey(s) !== key), btn, 'Eliminata') && editingKey === key) resetWeeklyForm();
+}
 
 // ---------- Date speciali ----------
+const sKey = e => [e.year, e.month, e.day, e.hour, e.minute, e.melodyIndex, e.name, e.isRecurring ? 1 : 0].join('|');
 function renderSpecial() {
-  $('special').innerHTML = special.length ? special.map((e, i) => `<div class="item ev" data-i="${i}">
-    <input data-f="name" value="${esc(e.name)}" placeholder="Nome">
-    <input type="date" data-f="date" value="${e.year}-${pad(e.month)}-${pad(e.day)}">
-    <input type="time" data-f="time" value="${pad(e.hour)}:${pad(e.minute)}">
-    <select data-f="melodyIndex">${melodyOpts(e.melodyIndex)}</select>
-    <select data-f="type">${TYPES.map((t, n) => `<option value="${n}"${n == e.type ? ' selected' : ''}>${t}</option>`).join('')}</select>
-    <label class="switch"><input type="checkbox" data-f="isRecurring"${e.isRecurring ? ' checked' : ''}> ogni anno</label>
-    <label class="switch"><input type="checkbox" data-f="isActive"${e.isActive ? ' checked' : ''}> attiva</label>
-    <button onclick="readSpecial();special.splice(${i},1);renderSpecial()">✕</button></div>`).join('')
-    : '<p class="muted">Nessuna data speciale</p>';
+  const list = shownSpecial = [...special].sort((a, b) => (a.month - b.month) || (a.day - b.day) || (a.hour * 60 + a.minute - b.hour * 60 - b.minute));
+  $('special').innerHTML = list.length ? list.map((e, i) => {
+    const k = 'sKey(shownSpecial[' + i + '])', past = !e.isRecurring && isPast(e);
+    return `<div class="sched${e.isActive && !past ? '' : ' off'}">
+      <div class="t">${pad(e.day)}/${pad(e.month)}</div>
+      <div class="info"><b>${hm(e.hour, e.minute)} · ${melodyLabel(e.melodyIndex)}${e.name ? '<span class="tag">' + esc(e.name) + '</span>' : ''}</b>
+        <div class="d">${e.isRecurring ? 'ogni anno' : e.year}${past ? ' · passata' : ''}${e.isActive ? '' : ' · in pausa'}</div></div>
+      <div class="acts">
+        <button title="${e.isActive ? 'Metti in pausa' : 'Riattiva'}" onclick="toggleSpecial(${k},this)">${e.isActive ? '⏸' : '▶'}</button>
+        <button title="Modifica" onclick="editSpecial(${k})">✏️</button>
+        <button title="Elimina" onclick="deleteSpecial(${k},this)">🗑</button>
+      </div></div>`;
+  }).join('') : '<p class="muted">Nessuna data speciale.</p>';
+  renderNext();
 }
-const readSpecial = () => readRows($('special'), special);
-async function loadSpecial() { try { special = (await api('/api/special-events')).events || []; } catch (e) {} renderSpecial(); }
-function addSpecial() {
-  readSpecial(); const d = new Date();
-  special.push({ id: Date.now(), name: '', type: 4, year: d.getFullYear(), month: d.getMonth() + 1, day: d.getDate(), hour: 12, minute: 0, melodyIndex: 0, isRecurring: false, isActive: true });
-  renderSpecial();
+function isPast(e) {
+  const n = deviceNow() || new Date();
+  return new Date(e.year, e.month - 1, e.day, e.hour, e.minute) < n;
 }
-async function saveSpecial() { readSpecial(); await act(api('/api/special-events', { events: special }), 'Date salvate'); }
+let editingSKey = null;
+function resetSpecialForm() {
+  editingSKey = null; $('sName').value = ''; $('sYearly').checked = false;
+  const n = deviceNow() || new Date();
+  $('sDate').value = n.getFullYear() + '-' + pad(n.getMonth() + 1) + '-' + pad(n.getDate());
+  $('sTitle').textContent = '➕ Nuova data speciale';
+  $('sSave').textContent = 'Aggiungi'; $('sCancel').style.display = 'none'; $('sForm').classList.remove('editing');
+}
+function editSpecial(key) {
+  const e = special.find(x => sKey(x) === key); if (!e) return;
+  editingSKey = key;
+  $('sDate').value = e.year + '-' + pad(e.month) + '-' + pad(e.day); $('sTime').value = hm(e.hour, e.minute);
+  $('sMelody').value = e.melodyIndex; $('sName').value = e.name || ''; $('sYearly').checked = !!e.isRecurring;
+  $('sTitle').textContent = '✏️ Modifica data speciale';
+  $('sSave').textContent = 'Salva modifiche'; $('sCancel').style.display = ''; $('sForm').classList.add('editing');
+  $('sForm').scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+async function persistSpecial(next, btn, okMsg) {
+  const res = await act(btn, api('/api/special-events', { events: next }), okMsg);
+  if (res) { special = next; renderSpecial(); return true; }
+  return false;
+}
+async function saveSpecialForm(btn) {
+  const date = $('sDate').value, time = $('sTime').value, mel = $('sMelody').value;
+  if (!date) return toast('Scegli la data', true);
+  if (!time) return toast("Inserisci l'ora", true);
+  if (mel === '') return toast('Scegli una melodia', true);
+  const [y, mo, d] = date.split('-').map(Number), [h, m] = time.split(':').map(Number);
+  const old = editingSKey ? special.find(x => sKey(x) === editingSKey) : null;
+  const rest = special.filter(x => x !== old);
+  if (rest.length >= MAX_SPECIAL) return toast('Massimo ' + MAX_SPECIAL + ' date speciali: eliminane una passata', true);
+  const ev = { name: $('sName').value.trim(), type: old ? old.type : 5, year: y, month: mo, day: d, hour: h, minute: m,
+               melodyIndex: +mel, isRecurring: $('sYearly').checked, isActive: old ? old.isActive : true };
+  if (!ev.isRecurring && isPast(ev) && !confirm('Questa data è già passata. Salvarla lo stesso?')) return;
+  if (await persistSpecial(rest.concat(ev), btn, old ? 'Modifica salvata' : 'Data aggiunta')) resetSpecialForm();
+}
+async function toggleSpecial(key, btn) {
+  await persistSpecial(special.map(e => sKey(e) === key ? { ...e, isActive: !e.isActive } : e), btn, 'Salvato');
+}
+async function deleteSpecial(key, btn) {
+  const e = special.find(x => sKey(x) === key); if (!e) return;
+  if (!confirm('Eliminare la data ' + pad(e.day) + '/' + pad(e.month) + ' alle ' + hm(e.hour, e.minute) + '?')) return;
+  if (await persistSpecial(special.filter(x => x !== e), btn, 'Eliminata') && editingSKey === key) resetSpecialForm();
+}
+
+// ---------- Prossima campana (calcolata con l'ora del dispositivo) ----------
+function renderNext() {
+  const now = deviceNow();
+  if (!now) { $('nextRing').textContent = '--'; return; }
+  let best = null;
+  const consider = (when, label) => { if (when > now && (!best || when < best.when)) best = { when, label }; };
+  weekly.filter(s => s.isActive && melodyName(s.melodyIndex)).forEach(s => {
+    for (let k = 0; k <= 7; k++) {
+      const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() + k, s.hour, s.minute);
+      if (d.getDay() === +s.dayOfWeek) consider(d, melodyName(s.melodyIndex) + (s.name ? ' (' + s.name + ')' : ''));
+    }
+  });
+  special.filter(e => e.isActive && melodyName(e.melodyIndex)).forEach(e => {
+    const years = e.isRecurring ? [now.getFullYear(), now.getFullYear() + 1] : [e.year];
+    years.forEach(y => consider(new Date(y, e.month - 1, e.day, e.hour, e.minute), melodyName(e.melodyIndex) + (e.name ? ' (' + e.name + ')' : '')));
+  });
+  if (!best) { $('nextRing').textContent = 'Nessuna in programma'; return; }
+  const w = best.when, days = Math.round((new Date(w.getFullYear(), w.getMonth(), w.getDate()) - new Date(now.getFullYear(), now.getMonth(), now.getDate())) / 86400000);
+  const day = days === 0 ? 'oggi' : days === 1 ? 'domani' : DAYS[w.getDay()].toLowerCase() + ' ' + w.getDate() + '/' + (w.getMonth() + 1);
+  $('nextRing').innerHTML = '<b>' + esc(day) + ' alle ' + hm(w.getHours(), w.getMinutes()) + '</b> · ' + esc(best.label);
+}
 
 // ---------- Impostazioni ----------
-async function setTime() {
+async function setTime(btn) {
   const v = $('dateTime').value; if (!v) return toast('Scegli data e ora', true);
-  await act(api('/api/set-time', { dateTime: v + (v.length === 16 ? ':00' : '') }), 'Ora impostata'); syncClock();
+  if (await act(btn, api('/api/set-time', { dateTime: v + (v.length === 16 ? ':00' : '') }), 'Ora impostata')) syncClock();
 }
-async function syncNtp() { await act(api('/api/ntp-resync', '{}'), 'Sincronizzazione avviata'); setTimeout(syncClock, 3000); }
-async function saveWifi() {
+async function syncNtp(btn) { if (await act(btn, api('/api/ntp-resync', '{}'), 'Sincronizzazione avviata')) setTimeout(syncClock, 3000); }
+async function saveWifi(btn) {
   const ssid = $('ssid').value.trim(), password = $('pass').value;
   if (!ssid || !password) return toast('Inserisci nome rete e password', true);
   if (!confirm('Salvare e riavviare?')) return;
-  await act(api('/api/configure-wifi', { ssid, password }), 'Salvato: il dispositivo si riavvia');
+  await act(btn, api('/api/configure-wifi', { ssid, password }), 'Salvato: il dispositivo si riavvia');
 }
 function toggleStatic() { $('staticBox').style.display = $('dhcp').checked ? 'none' : 'grid'; }
 async function loadNet() {
@@ -423,10 +623,10 @@ async function loadNet() {
     toggleStatic();
   } catch (e) {}
 }
-async function saveNet() {
+async function saveNet(btn) {
   const c = { dhcp: $('dhcp').checked };
   if (!c.dhcp) Object.assign(c, { static_ip: $('ip').value, gateway: $('gw').value, subnet: $('sn').value, dns1: $('dns1').value, dns2: $('dns2').value });
-  await act(api('/api/network-config', c), 'Salvato: vale dal prossimo riavvio');
+  await act(btn, api('/api/network-config', c), 'Salvato: vale dal prossimo riavvio');
 }
 async function loadTelegram() {
   try {
@@ -435,48 +635,59 @@ async function loadTelegram() {
     $('tgState').textContent = t.enabled ? 'Bot attivo' : 'Bot disattivato';
     const users = t.authorizedUsers || [];
     $('tgUsers').innerHTML = users.length ? users.map(u =>
-      `<div class="row" style="margin:4px 0">👤 ${esc(u)} <button onclick="tgRemove('${esc(u)}')">Rimuovi</button></div>`).join('') : 'Nessun utente autorizzato';
-  } catch (e) {}
+      `<div class="row" style="margin:4px 0">👤 ${esc(u)} <button onclick="tgRemove('${esc(u)}',this)">Rimuovi</button></div>`).join('') : 'Nessun utente autorizzato';
+    return t;
+  } catch (e) { return null; }
 }
-async function tgAdd() {
+async function tgAdd(btn) {
   const id = $('tgNew').value.trim();
   if (!/^-?\d+$/.test(id)) return toast('Il Chat ID è un numero', true);
-  await act(api('/api/telegram/add-user', { chatId: id }), 'Utente aggiunto'); $('tgNew').value = ''; loadTelegram();
+  if (await act(btn, api('/api/telegram/add-user', { chatId: id }), 'Utente aggiunto')) { $('tgNew').value = ''; loadTelegram(); }
 }
-async function tgRemove(id) { if (!confirm('Rimuovere ' + id + '?')) return; await act(api('/api/telegram/remove-user', { chatId: id }), 'Utente rimosso'); loadTelegram(); }
-async function tgToggle() {
-  const t = await api('/api/telegram/status');
-  await act(api('/api/telegram/toggle', { enabled: !t.enabled }), t.enabled ? 'Bot disattivato' : 'Bot attivato'); loadTelegram();
+async function tgRemove(id, btn) { if (!confirm('Rimuovere ' + id + '?')) return; if (await act(btn, api('/api/telegram/remove-user', { chatId: id }), 'Utente rimosso')) loadTelegram(); }
+async function tgToggle(btn) {
+  const t = await loadTelegram(); if (!t) return toast('Errore lettura stato Telegram', true);
+  if (await act(btn, api('/api/telegram/toggle', { enabled: !t.enabled }), t.enabled ? 'Bot disattivato' : 'Bot attivato')) loadTelegram();
 }
-async function tgTest() { await act(api('/api/telegram/send-test', '{}'), 'Messaggio di prova inviato'); }
-async function backup() {
-  try {
-    const data = await api('/api/backup');
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }));
-    a.download = 'campane_backup_' + new Date().toISOString().slice(0, 10) + '.json'; a.click();
-    URL.revokeObjectURL(a.href);
-  } catch (e) { toast('Errore backup', true); }
+async function tgTest(btn) { await act(btn, api('/api/telegram/send-test', '{}'), 'Messaggio di prova inviato'); }
+async function backup(btn) {
+  const data = await act(btn, api('/api/backup'));
+  if (!data) return;
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' }));
+  a.download = 'campane_backup_' + new Date().toISOString().slice(0, 10) + '.json'; a.click();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1000);
 }
-async function restore() {
+async function restore(btn) {
   const f = $('restoreFile').files[0]; if (!f) return toast('Scegli il file di backup', true);
   if (!confirm('Il ripristino sostituisce melodie e programmazioni. Continuare?')) return;
-  await act(api('/api/restore', await f.text()), 'Ripristino completato');
-  await loadMelodies(); loadWeekly(); loadSpecial();
+  if (await act(btn, api('/api/restore', await f.text()), 'Ripristino completato')) loadAll();
 }
 
-// ---------- Avvio e aggiornamenti (solo se la pagina è visibile) ----------
-$('addDays').innerHTML = [1, 2, 3, 4, 5, 6, 0].map(d => `<label><input type="checkbox" value="${d}"> ${DAYS[d].slice(0, 3)}</label>`).join(' ');
-(async () => {
-  await syncClock(); await loadStatus(); await loadMelodies(); await loadWeekly(); await loadSpecial();
-})();
+// ---------- Avvio: UNA richiesta per tutto, poi aggiornamenti leggeri ----------
+async function loadAll() {
+  try {
+    const d = await api('/api/init');
+    setClock(d.time); applyStatus(d.status);
+    applyMelodies(d.melodies && d.melodies.melodies);
+    weekly = (d.weekly && d.weekly.schedules) || [];
+    special = (d.special && d.special.events) || [];
+  } catch (e) {
+    toast('Dispositivo non raggiungibile: ' + e.message, true);
+  }
+  tickClock(); renderWeekly(); renderSpecial(); resetSpecialForm();
+}
+loadAll();
 setInterval(tickClock, 1000);
-let lastStatus = 0, lastClock = 0;
+let lastStatus = Date.now(), lastClock = Date.now(), lastMinute = -1;
 setInterval(() => {
   if (document.hidden) return;
   const now = Date.now();
-  if (now - lastStatus >= (status.isPlaying ? 2000 : 15000)) { lastStatus = now; loadStatus(); }
-  if (now - lastClock >= 60000) { lastClock = now; syncClock(); }
+  // Stato: ogni 2 s mentre suona, altrimenti ogni 20 s
+  if (now - lastStatus >= (status.isPlaying ? 2000 : 20000) && pending === 0) { lastStatus = now; loadStatus(); }
+  if (now - lastClock >= 300000 && pending === 0) { lastClock = now; syncClock(); }
+  const n = deviceNow();
+  if (n && n.getMinutes() !== lastMinute) { lastMinute = n.getMinutes(); renderNext(); }
 }, 1000);
 document.addEventListener('visibilitychange', () => { if (!document.hidden) { syncClock(); loadStatus(); } });
 </script>

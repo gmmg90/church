@@ -30,7 +30,7 @@ namespace Hardware {
     // Relè generale: contatti in serie all'alimentazione dei martelli.
     // Chiuso solo mentre si suona: se un SSR o un teleruttore resta incollato, i martelli restano senza corrente.
     constexpr uint8_t MASTER_RELAY_PIN = 33;
-    constexpr bool MASTER_RELAY_ACTIVE_HIGH = false;  // modulo relè con ingresso attivo LOW
+    constexpr bool MASTER_RELAY_ACTIVE_HIGH = false;  // HL-52S: si accende con 0 V (attivo LOW), contatto NO
     // Open-drain: OFF = pin scollegato (il modulo a 5V non si spegne con i 3,3V di un HIGH)
     constexpr bool MASTER_RELAY_OPEN_DRAIN = false;
     constexpr uint8_t MASTER_PIN_MODE = MASTER_RELAY_OPEN_DRAIN ? OUTPUT_OPEN_DRAIN : OUTPUT;

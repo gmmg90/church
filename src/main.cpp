@@ -1151,31 +1151,43 @@ void loop() {
   // Gestione pulsante CONFIG (GPIO0):
   // - breve pressione (<2s): toggle campane abilitate
   // - lunga pressione (>=2s): attiva AP di configurazione
+  // Filtro anti-disturbo: lo stato cambia solo se resta stabile per CFG_DEBOUNCE_MS.
+  // Prima un disturbo di 1 ms sul pin bastava a disabilitare le campane.
   {
-  static bool lastCfgState = false; // GPIO0 boot button
+    static const uint32_t CFG_DEBOUNCE_MS = 100;
+    static bool stablePressed = false;   // stato filtrato
+    static bool lastRaw = false;
+    static uint32_t rawChangeTime = 0;
     static uint32_t pressStart = 0;
     static bool longHandled = false;
-  bool pressed = isButtonPressedLevel(digitalRead(CONFIG_BUTTON_PIN), Hardware::CONFIG_BUTTON_ACTIVE_LOW);
+    bool raw = isButtonPressedLevel(digitalRead(CONFIG_BUTTON_PIN), Hardware::CONFIG_BUTTON_ACTIVE_LOW);
     uint32_t now = millis();
 
-    // Edge di pressione
-    if (pressed && !lastCfgState) {
-      pressStart = now; // inizio pressione
-      longHandled = false; // reset gestione long-press
+    if (raw != lastRaw) {
+      lastRaw = raw;
+      rawChangeTime = now;
     }
-    // Long press: una sola volta per pressione
-    if (pressed && !longHandled && (now - pressStart >= 2000)) {
-      startApConfig();
-      longHandled = true; // non ripetere finché non rilascia
-    }
-    // Rilascio: se non c'è stata long-press, gestisci come breve
-    if (!pressed && lastCfgState) {
-      uint32_t held = now - pressStart;
-      if (!longHandled && held < 2000) {
-        bellController.setEnabled(!bellController.isEnabled());
+    if (raw != stablePressed && now - rawChangeTime >= CFG_DEBOUNCE_MS) {
+      stablePressed = raw;
+      if (stablePressed) {
+        pressStart = rawChangeTime;   // inizio pressione (filtrata)
+        longHandled = false;
+      } else if (!longHandled) {
+        // Pressione breve confermata: abilita/disabilita le campane
+        bool enable = !bellController.isEnabled();
+        bellController.setEnabled(enable);
+        Serial.printf("[CONFIG] Pulsante GPIO0: campane %s\n", enable ? "ABILITATE" : "DISABILITATE");
+        if (telegramBot.isEnabled()) {
+          telegramBot.sendNotification(enable ? "✅ Campane ABILITATE dal pulsante sulla scheda."
+                                              : "⛔ Campane DISABILITATE dal pulsante sulla scheda.");
+        }
       }
     }
-    lastCfgState = pressed;
+    // Pressione lunga (2 s, filtrata): Access Point di configurazione, una volta sola
+    if (stablePressed && !longHandled && now - pressStart >= 2000) {
+      startApConfig();
+      longHandled = true;
+    }
   }
 
   // Coopera con stack async
@@ -1903,6 +1915,92 @@ void connectWiFi() {
   Serial.println(WiFi.softAPIP());
 }
 
+// ===== Costruzione delle risposte JSON (usate dalle singole API e da /api/init) =====
+
+// Stato del sistema, in cache per CACHE_DURATION_MS. Stringa vuota se non disponibile.
+static String buildStatusJson() {
+  unsigned long now = millis();
+  if (now - lastStatusCache < CACHE_DURATION_MS && cachedStatusJson.length() > 0) {
+    return cachedStatusJson;
+  }
+  CommandHandler::CommandResult result = CommandHandler::getInstance().getStatus();
+  if (!result.success || !result.jsonData) return String();
+
+  JsonDocument& doc = *result.jsonData;
+  doc["temperatureStatus"] = getTemperatureStatus();
+  doc["timezoneDescription"] = String("Italia UTC+") + String(utcOffsetHours) + (isDST ? " (Ora Legale)" : " (Ora Solare)");
+  doc["isPlaying"] = bellController.isPlayingMelody();
+  if (bellController.isPlayingMelody()) {
+    doc["playingName"] = bellController.getMelodyName(bellController.getCurrentMelodyIndex());
+  }
+  uint32_t bootEpoch = 0;
+  if (systemStatus.ntpSynced) {
+    time_t t = time(nullptr);
+    if (t > 0) bootEpoch = (uint32_t)t - (millis() / 1000);
+  } else if (systemStatus.rtcConnected) {
+    bootEpoch = (uint32_t)rtc.now().unixtime() - (millis() / 1000);
+  }
+  if (bootEpoch > 0) doc["bootEpoch"] = bootEpoch;
+
+  String json;
+  serializeJson(doc, json);
+  cachedStatusJson = json;
+  lastStatusCache = now;
+  return json;
+}
+
+// Ora corrente, in cache per CACHE_DURATION_MS. Stringa vuota se non disponibile.
+static String buildTimeJson() {
+  unsigned long now = millis();
+  if (now - lastTimeCache < CACHE_DURATION_MS && cachedTimeJson.length() > 0) {
+    return cachedTimeJson;
+  }
+  CommandHandler::CommandResult result = CommandHandler::getInstance().getCurrentTime();
+  if (!result.success || !result.jsonData) return String();
+  String json;
+  serializeJson(*result.jsonData, json);
+  cachedTimeJson = json;
+  lastTimeCache = now;
+  return json;
+}
+
+static String buildMelodiesJson() {
+  CommandHandler::CommandResult result = CommandHandler::getInstance().getMelodiesList();
+  if (!result.success || !result.jsonData) return String("{\"melodies\":[]}");
+  String json;
+  serializeJson(*result.jsonData, json);
+  return json;
+}
+
+static String buildWeeklyJson() {
+  DynamicJsonDocument doc(16384);
+  JsonArray arr = doc.createNestedArray("schedules");
+  for (int i = 0; i < weeklyCount; i++) {
+    const WeeklySchedule &e = weeklyArr[i];
+    JsonObject o = arr.createNestedObject();
+    o["id"] = e.id; o["name"] = e.name; o["dayOfWeek"] = (int)e.dayOfWeek; o["hour"] = e.hour;
+    o["minute"] = e.minute; o["melodyIndex"] = e.melodyIndex; o["isActive"] = e.isActive;
+  }
+  String json;
+  serializeJson(doc, json);
+  return json;
+}
+
+static String buildSpecialJson() {
+  DynamicJsonDocument doc(8192);
+  JsonArray arr = doc.createNestedArray("events");
+  for (int i = 0; i < specialCount; i++) {
+    const SpecialEvent &e = specialArr[i];
+    JsonObject o = arr.createNestedObject();
+    o["id"] = e.id; o["name"] = e.name; o["type"] = (int)e.type; o["year"] = e.year; o["month"] = e.month;
+    o["day"] = e.day; o["hour"] = e.hour; o["minute"] = e.minute; o["melodyIndex"] = e.melodyIndex;
+    o["isActive"] = e.isActive; o["isRecurring"] = e.isRecurring;
+  }
+  String json;
+  serializeJson(doc, json);
+  return json;
+}
+
 void setupWebServer() {
   Serial.println("[DEBUG] Chiamata: setupWebServer()");
   Serial.println("Configurazione Web Server...");
@@ -1912,83 +2010,47 @@ void setupWebServer() {
   // impedendo alle API di funzionare.
   
   // API per ottenere lo stato del sistema
+  // Niente limite di frequenza: la risposta è in cache per 1 s, quindi richieste
+  // ravvicinate costano poco (il 429 faceva solo ripetere le richieste alla pagina)
   server.on("/api/status", HTTP_GET, [](AsyncWebServerRequest *request){
-    // Rate limiting (150ms minimo tra richieste)
-    static uint32_t lastMs = 0;
-    uint32_t now = millis();
-    if (now - lastMs < 150) {
-      request->send(429, "text/plain", "Too Many Requests");
+    String json = buildStatusJson();
+    if (json.length() == 0) {
+      request->send(500, "application/json", "{\"success\":false,\"message\":\"stato non disponibile\"}");
       return;
     }
-    lastMs = now;
-    
-    // Cache: se risposta già generata negli ultimi 1s, riutilizzala
-    if (now - lastStatusCache < CACHE_DURATION_MS && cachedStatusJson.length() > 0) {
-      AsyncWebServerResponse* r = request->beginResponse(200, "application/json", cachedStatusJson);
-      r->addHeader("Connection", "close");
-      r->addHeader("X-Cache", "HIT"); // Debug header
-      request->send(r);
-      return;
-    }
-    
-    Serial.println("📡 Richiesta ricevuta: /api/status (cache miss)");
-
-    CommandHandler& handler = CommandHandler::getInstance();
-    CommandHandler::CommandResult result = handler.getStatus();
-    if (!result.success || !result.jsonData) {
-      request->send(500, "application/json", String("{\"success\":false,\"message\":\"") + result.message + "\"}");
-      return;
-    }
-
-    JsonDocument& doc = *result.jsonData;
-    doc["temperatureStatus"] = getTemperatureStatus();
-    doc["timezoneDescription"] = String("Italia UTC+") + String(utcOffsetHours) + (isDST ? " (Ora Legale)" : " (Ora Solare)");
-    doc["isPlaying"] = bellController.isPlayingMelody();
-    if (bellController.isPlayingMelody()) {
-      doc["playingName"] = bellController.getMelodyName(bellController.getCurrentMelodyIndex());
-    }
-
-    // Uptime e boot epoch (manteniamo i campi storici della UI)
-    uint32_t bootEpoch = 0;
-    if (systemStatus.ntpSynced) {
-      time_t now = time(nullptr);
-      if (now > 0) bootEpoch = (uint32_t)now - (millis() / 1000);
-    } else if (systemStatus.rtcConnected) {
-      DateTime now = rtc.now();
-      bootEpoch = (uint32_t)now.unixtime() - (millis() / 1000);
-    }
-    if (bootEpoch > 0) {
-      doc["bootEpoch"] = bootEpoch;
-    }
-
-    cachedStatusJson = "";
-    serializeJson(doc, cachedStatusJson);
-    lastStatusCache = now;
-    
-    AsyncWebServerResponse* r = request->beginResponse(200, "application/json", cachedStatusJson);
+    AsyncWebServerResponse* r = request->beginResponse(200, "application/json", json);
     r->addHeader("Connection", "close");
-    r->addHeader("X-Cache", "MISS"); // Debug header
     request->send(r);
-        
-    Serial.println("✓ Risposta inviata: status JSON");
+  });
+
+  // API unica per l'apertura della pagina: ora, stato, melodie e programmazioni in
+  // UNA sola richiesta (con WiFi debole ogni connessione costa 1-1,5 s).
+  server.on("/api/init", HTTP_GET, [](AsyncWebServerRequest *request){
+    String out;
+    out.reserve(6144);
+    out += "{\"time\":";
+    String t = buildTimeJson();
+    out += t.length() ? t : String("null");
+    out += ",\"status\":";
+    String s = buildStatusJson();
+    out += s.length() ? s : String("null");
+    out += ",\"melodies\":";
+    out += buildMelodiesJson();
+    out += ",\"weekly\":";
+    out += buildWeeklyJson();
+    out += ",\"special\":";
+    out += buildSpecialJson();
+    out += "}";
+    AsyncWebServerResponse* r = request->beginResponse(200, "application/json", out);
+    r->addHeader("Connection", "close");
+    request->send(r);
   });
   
   // API per ottenere le melodie
   server.on("/api/melodies", HTTP_GET, [](AsyncWebServerRequest *request){
-    CommandHandler& handler = CommandHandler::getInstance();
-    CommandHandler::CommandResult result = handler.getMelodiesList();
-    if (!result.success || !result.jsonData) {
-      request->send(500, "application/json", String("{\"success\":false,\"message\":\"") + result.message + "\"}");
-      return;
-    }
-
-    String response;
-    serializeJson(*result.jsonData, response);
-    AsyncWebServerResponse* r = request->beginResponse(200, "application/json", response);
+    AsyncWebServerResponse* r = request->beginResponse(200, "application/json", buildMelodiesJson());
     r->addHeader("Connection", "close");
     request->send(r);
-        
-    Serial.println("✓ Risposta inviata: melodie JSON");
   });
 
   // API: dettagli melodia singola
@@ -2012,43 +2074,19 @@ void setupWebServer() {
 
   // API orario corrente per UI
   server.on("/api/time", HTTP_GET, [](AsyncWebServerRequest *request){
-    unsigned long now = millis();
-    
-    // Cache: se risposta già generata negli ultimi 1s, riutilizzala
-    if (now - lastTimeCache < CACHE_DURATION_MS && cachedTimeJson.length() > 0) {
-      request->send(200, "application/json", cachedTimeJson);
+    String json = buildTimeJson();
+    if (json.length() == 0) {
+      request->send(503, "application/json", "{\"success\":false,\"message\":\"ora non disponibile\"}");
       return;
     }
-    
-    CommandHandler& handler = CommandHandler::getInstance();
-    CommandHandler::CommandResult result = handler.getCurrentTime();
-    if (!result.success || !result.jsonData) {
-      request->send(503, "application/json", String("{\"success\":false,\"message\":\"") + result.message + "\"}");
-      return;
-    }
-
-    cachedTimeJson = "";
-    serializeJson(*result.jsonData, cachedTimeJson);
-    lastTimeCache = now;
-    
-    request->send(200, "application/json", cachedTimeJson);
+    request->send(200, "application/json", json);
   });
-  
+
   // API per ottenere programmazioni settimanali
   server.on("/api/weekly-schedules", HTTP_GET, [](AsyncWebServerRequest *request){
-    Serial.println("📡 Richiesta ricevuta: /api/weekly-schedules (GET)");
-    DynamicJsonDocument doc(16384);
-    JsonArray arr = doc.createNestedArray("schedules");
-    for (int i=0;i<weeklyCount;i++){
-      if ((i & 3) == 0) { yield(); }
-      const WeeklySchedule &e = weeklyArr[i];
-      JsonObject o = arr.createNestedObject();
-      o["id"]=e.id; o["name"]=e.name; o["dayOfWeek"]=e.dayOfWeek; o["hour"]=e.hour; o["minute"]=e.minute; o["melodyIndex"]=e.melodyIndex; o["isActive"]=e.isActive;
-    }
-  String response; serializeJson(doc, response);
-  AsyncWebServerResponse* r = request->beginResponse(200, "application/json", response);
-  r->addHeader("Connection", "close");
-  request->send(r);
+    AsyncWebServerResponse* r = request->beginResponse(200, "application/json", buildWeeklyJson());
+    r->addHeader("Connection", "close");
+    request->send(r);
   });
   server.on("/api/weekly-schedules", HTTP_POST, [](AsyncWebServerRequest *request){}, NULL, [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total){
     Serial.println("📡 Richiesta ricevuta: /api/weekly-schedules (POST)");
@@ -2069,24 +2107,22 @@ void setupWebServer() {
       request->send(400, "application/json", "{\"success\":false,\"message\":\"Campo schedules mancante\"}"); return;
     }
     
-    // Track max ID for auto-generation
-    uint8_t nextId = 1;
+    // Gli ID vengono riassegnati in ordine (1..n): quelli inviati dal browser
+    // (es. Date.now()) non stanno in un uint8_t. Valori fuori range vengono scartati.
+    JsonArray list = doc["schedules"].as<JsonArray>();
+    if (list.size() > MAX_WEEKLY_SCHEDULES) {
+      request->send(400, "application/json", "{\"success\":false,\"message\":\"Troppe programmazioni (max " + String(MAX_WEEKLY_SCHEDULES) + ")\"}");
+      return;
+    }
     weeklyCount = 0;
-    for (JsonObject o : doc["schedules"].as<JsonArray>()){
-      if (weeklyCount>=MAX_WEEKLY_SCHEDULES) break;
+    for (JsonObject o : list){
+      int dow = o["dayOfWeek"] | -1, h = o["hour"] | -1, m = o["minute"] | -1, mel = o["melodyIndex"] | -1;
+      if (dow < 0 || dow > 6 || h < 0 || h > 23 || m < 0 || m > 59 || mel < 0 || mel > 9) continue;
       WeeklySchedule &e = weeklyArr[weeklyCount++];
       strlcpy(e.name, (o["name"] | ""), sizeof(e.name));
-      
-      // Preserve existing ID or generate new one
-      if (o.containsKey("id")) {
-        e.id = o["id"];
-        if (e.id >= nextId) nextId = e.id + 1;
-      } else {
-        e.id = nextId++;
-      }
-      
-      e.dayOfWeek = (DayOfWeek)(int)(o["dayOfWeek"] | 0);
-      e.hour = o["hour"] | 0; e.minute = o["minute"] | 0; e.melodyIndex = o["melodyIndex"] | 0; e.isActive = o["isActive"] | true;
+      e.id = weeklyCount;
+      e.dayOfWeek = (DayOfWeek)dow;
+      e.hour = h; e.minute = m; e.melodyIndex = mel; e.isActive = o["isActive"] | true;
       if ((weeklyCount & 3) == 0) { yield(); }
     }
     saveSchedulesToFS();
@@ -2095,19 +2131,9 @@ void setupWebServer() {
   
   // API per ottenere eventi speciali
   server.on("/api/special-events", HTTP_GET, [](AsyncWebServerRequest *request){
-    Serial.println("📡 Richiesta ricevuta: /api/special-events (GET)");
-    DynamicJsonDocument doc(8192);
-    JsonArray arr = doc.createNestedArray("events");
-    for (int i=0;i<specialCount;i++){
-      if ((i & 3) == 0) { yield(); }
-      const SpecialEvent &e = specialArr[i];
-      JsonObject o = arr.createNestedObject();
-      o["id"]=e.id; o["name"]=e.name; o["type"]=e.type; o["year"]=e.year; o["month"]=e.month; o["day"]=e.day; o["hour"]=e.hour; o["minute"]=e.minute; o["melodyIndex"]=e.melodyIndex; o["isActive"]=e.isActive; o["isRecurring"]=e.isRecurring;
-    }
-  String response; serializeJson(doc, response);
-  AsyncWebServerResponse* r = request->beginResponse(200, "application/json", response);
-  r->addHeader("Connection", "close");
-  request->send(r);
+    AsyncWebServerResponse* r = request->beginResponse(200, "application/json", buildSpecialJson());
+    r->addHeader("Connection", "close");
+    request->send(r);
   });
   server.on("/api/special-events", HTTP_POST, [](AsyncWebServerRequest *request){}, NULL, [](AsyncWebServerRequest *request, uint8_t *data, size_t len, size_t index, size_t total){
     Serial.println("📡 Richiesta ricevuta: /api/special-events (POST)");
@@ -2126,25 +2152,21 @@ void setupWebServer() {
       request->send(400, "application/json", "{\"success\":false,\"message\":\"Campo events mancante\"}"); return;
     }
     
-    // Track max ID for auto-generation
-    uint8_t nextId = 1;
+    JsonArray list = doc["events"].as<JsonArray>();
+    if (list.size() > MAX_SPECIAL_EVENTS) {
+      request->send(400, "application/json", "{\"success\":false,\"message\":\"Troppe date speciali (max " + String(MAX_SPECIAL_EVENTS) + ")\"}");
+      return;
+    }
     specialCount = 0;
-    for (JsonObject o : doc["events"].as<JsonArray>()){
-      if (specialCount>=MAX_SPECIAL_EVENTS) break;
+    for (JsonObject o : list){
+      int mo = o["month"] | 0, d = o["day"] | 0, h = o["hour"] | -1, mi = o["minute"] | -1, mel = o["melodyIndex"] | -1;
+      if (mo < 1 || mo > 12 || d < 1 || d > 31 || h < 0 || h > 23 || mi < 0 || mi > 59 || mel < 0 || mel > 9) continue;
       SpecialEvent &e = specialArr[specialCount++];
       strlcpy(e.name, (o["name"] | ""), sizeof(e.name));
-      
-      // Preserve existing ID or generate new one
-      if (o.containsKey("id")) {
-        e.id = o["id"];
-        if (e.id >= nextId) nextId = e.id + 1;
-      } else {
-        e.id = nextId++;
-      }
-      
+      e.id = specialCount;   // riassegnati in ordine (vedi programmazioni settimanali)
       e.type = (EventType)(int)(o["type"] | 5);
-      e.year = o["year"] | 0; e.month = o["month"] | 0; e.day = o["day"] | 0;
-      e.hour = o["hour"] | 0; e.minute = o["minute"] | 0; e.melodyIndex = o["melodyIndex"] | 0; e.isActive = o["isActive"] | true; e.isRecurring = o["isRecurring"] | false;
+      e.year = o["year"] | 0; e.month = mo; e.day = d;
+      e.hour = h; e.minute = mi; e.melodyIndex = mel; e.isActive = o["isActive"] | true; e.isRecurring = o["isRecurring"] | false;
       if ((specialCount & 3) == 0) { yield(); }
     }
     saveSchedulesToFS();
@@ -3227,9 +3249,21 @@ void setupWebServer() {
     if (!request->authenticate(ADMIN_USER, ADMIN_PASSWORD)) {
       return request->requestAuthentication();
     }
+    // ETag: cambia a ogni compilazione (web_assets.h è incluso qui). Se il browser ha
+    // già la pagina, risponde 304 senza ritrasmetterla.
+    String etag = String("\"") + String(len) + "-" + String(__DATE__ " " __TIME__) + "\"";
+    etag.replace(" ", "_");
+    if (request->hasHeader("If-None-Match") && request->header("If-None-Match") == etag) {
+      AsyncWebServerResponse *nm = request->beginResponse(304);
+      nm->addHeader("ETag", etag);
+      nm->addHeader("Cache-Control", "no-cache");
+      request->send(nm);
+      return;
+    }
     AsyncWebServerResponse *r = request->beginResponse_P(200, "text/html", data, len);
     r->addHeader("Content-Encoding", "gzip");
     r->addHeader("Cache-Control", "no-cache");
+    r->addHeader("ETag", etag);
     request->send(r);
   };
   server.on("/", HTTP_GET, [sendPage](AsyncWebServerRequest *request){ sendPage(request, WEB_INDEX_GZ, WEB_INDEX_GZ_LEN); });
