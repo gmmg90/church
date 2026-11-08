@@ -20,7 +20,7 @@ button{font:inherit;border:1px solid #e5e0d6;background:#fff;border-radius:8px;p
 <body>
 <header><b>🔍 Diagnostica</b><a href="/">← Torna</a></header>
 <main>
-  <p><button onclick="loadAll()">🔄 Aggiorna</button> <button onclick="load('i2c','/api/i2c-scan')">Scansione I2C</button></p>
+  <p><button onclick="loadAll()">🔄 Aggiorna</button> <button onclick="scanI2C(this)">Scansione I2C</button></p>
   <div class="card"><h2>Sistema</h2><div id="diag">Caricamento...</div></div>
   <div class="card"><h2>Recovery</h2><div id="recovery"></div></div>
   <div class="card"><h2>I2C</h2><div id="i2c" style="color:#777">Premi "Scansione I2C"</div></div>
@@ -35,6 +35,12 @@ function table(o) {
 async function load(id, url) {
   try { const r = await fetch(url); document.getElementById(id).innerHTML = table(await r.json()); }
   catch (e) { document.getElementById(id).textContent = 'Errore: ' + e.message; }
+}
+// La scansione la fa la scheda per conto suo: la si avvia e poi si legge il risultato
+async function scanI2C(btn) {
+  btn.disabled = true; document.getElementById('i2c').textContent = 'Scansione in corso...';
+  try { await fetch('/api/i2c-scan?start=1'); } catch (e) {}
+  setTimeout(async () => { await load('i2c', '/api/i2c-scan'); btn.disabled = false; }, 2500);
 }
 async function loadAll() { await load('diag', '/api/diagnostics'); await load('recovery', '/api/recovery-status'); }
 loadAll();

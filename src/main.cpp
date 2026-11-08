@@ -147,6 +147,7 @@ bool loadTelegramUsersFromFS();
 bool saveAutoMaintenanceStateToFS();
 bool loadAutoMaintenanceStateFromFS();
 void checkAutoTelegramMaintenance();
+void runAutoMaintenance(const struct tm &timeInfo);
 String buildAutoMaintenanceReport(const struct tm &timeInfo);
 bool getLocalTm(struct tm &out);
 // Forward declarations for functions used before their definitions
@@ -659,11 +660,18 @@ void checkAutoTelegramMaintenance() {
 
   lastAutoMaintenanceSlot = slotKey;
   saveAutoMaintenanceStateToFS();
+  Serial.printf("[Maintenance] Slot automatico %s\n", slotKey);
+  runAutoMaintenance(timeInfo);
+}
 
+// Report su Telegram e riavvio dopo AUTO_MAINTENANCE_RESTART_DELAY_MS.
+// Usata dagli slot automatici e dal comando seriale "manutenzione" (prova manuale).
+void runAutoMaintenance(const struct tm &timeInfo) {
   String report = buildAutoMaintenanceReport(timeInfo);
-  Serial.printf("[Maintenance] Slot automatico %s: invio report e riavvio pianificato\n", slotKey);
-  telegramBot.sendNotification(report);
-
+  Serial.println("[Maintenance] Invio report e riavvio pianificato");
+  if (telegramBot.isEnabled()) {
+    telegramBot.sendNotification(report);
+  }
   autoMaintenanceRestartPending = true;
   autoMaintenanceRestartAt = millis() + AUTO_MAINTENANCE_RESTART_DELAY_MS;
 }
@@ -767,20 +775,84 @@ bool loadMelodiesFromFS() {
 }
 
 // === SCAN I2C ===
-void scanI2CDevices() {
-  byte count = 0;
-  for (byte address = 1; address < 127; address++) {
-    Wire.beginTransmission(address);
-    byte error = Wire.endTransmission();
-    if (error == 0) {
-      Serial.print("I2C device found at address 0x");
-      if (address < 16) Serial.print("0");
-      Serial.print(address, HEX);
-      Serial.println(" !");
-      count++;
+// Risultato dell'ultima scansione (JSON) e richiesta dalla pagina web.
+// La scansione gira SOLO nel loop(): mai in parallelo ad altri usi del bus.
+String i2cScanResult = "{\"stato\":\"scansione mai eseguita\"}";
+volatile bool i2cScanRequested = false;
+
+// Legge lo stato a riposo dei fili SDA/SCL: devono essere ALTI (pull-up).
+// Un filo a 0 V = cortocircuito, filo invertito o modulo che tiene il bus bloccato.
+// Se SDA è bloccato basso prova a liberarlo con 9 impulsi su SCL.
+static void i2cLineLevels(int &sda, int &scl) {
+  Wire.end();
+  pinMode(I2C_SDA_PIN, INPUT_PULLUP);
+  pinMode(I2C_SCL_PIN, INPUT_PULLUP);
+  delay(2);
+  sda = digitalRead(I2C_SDA_PIN);
+  scl = digitalRead(I2C_SCL_PIN);
+  if (sda == LOW && scl == HIGH) {
+    pinMode(I2C_SCL_PIN, OUTPUT_OPEN_DRAIN);
+    for (int i = 0; i < 9 && digitalRead(I2C_SDA_PIN) == LOW; i++) {
+      digitalWrite(I2C_SCL_PIN, LOW); delayMicroseconds(10);
+      digitalWrite(I2C_SCL_PIN, HIGH); delayMicroseconds(10);
     }
+    pinMode(I2C_SCL_PIN, INPUT_PULLUP);
+    delay(1);
+    sda = digitalRead(I2C_SDA_PIN);
   }
-  Serial.printf("I2C scan complete, found %d device(s)\n", count);
+  Wire.begin(I2C_SDA_PIN, I2C_SCL_PIN);
+  Wire.setTimeOut(50);
+}
+
+void scanI2CDevices() {
+  int sda, scl;
+  i2cLineLevels(sda, scl);
+  Serial.printf("[I2C] SDA (GPIO%d) = %s, SCL (GPIO%d) = %s\n",
+                I2C_SDA_PIN, sda ? "ALTO (ok)" : "BASSO (bloccato!)",
+                I2C_SCL_PIN, scl ? "ALTO (ok)" : "BASSO (bloccato!)");
+
+  StaticJsonDocument<768> doc;
+  doc["sda"] = sda ? "alto (ok)" : "BASSO: bloccato";
+  doc["scl"] = scl ? "alto (ok)" : "BASSO: bloccato";
+  JsonArray arr = doc.createNestedArray("dispositivi");
+  uint8_t count = 0;
+
+  if (sda && scl) {
+    for (uint8_t address = 1; address < 127; address++) {
+      Wire.beginTransmission(address);
+      if (Wire.endTransmission() == 0) {
+        char hex[6];
+        snprintf(hex, sizeof(hex), "0x%02X", address);
+        String name = address == 0x68 ? " (RTC DS3231)" : address == 0x57 ? " (EEPROM del modulo RTC)" : "";
+        arr.add(String(hex) + name);
+        Serial.printf("[I2C] Trovato dispositivo a %s%s\n", hex, name.c_str());
+        count++;
+      }
+      if ((address & 15) == 0) { wdManager.feedIfNeeded(); yield(); }
+    }
+    // Riprova l'RTC: magari è stato collegato dopo l'avvio
+    systemStatus.rtcConnected = rtc.begin();
+    // RTC appena trovato e ora di Internet disponibile: lo rimette subito all'ora giusta
+    struct tm ti;
+    time_t sysNow = time(nullptr);
+    if (systemStatus.rtcConnected && systemStatus.ntpSynced && sysNow > 1000000 && localtime_r(&sysNow, &ti)) {
+      rtc.adjust(DateTime(ti.tm_year + 1900, ti.tm_mon + 1, ti.tm_mday, ti.tm_hour, ti.tm_min, ti.tm_sec));
+      DateTime r = rtc.now();
+      char buf[24];
+      snprintf(buf, sizeof(buf), "%02d/%02d/%04d %02d:%02d:%02d", r.day(), r.month(), r.year(), r.hour(), r.minute(), r.second());
+      doc["ora_rtc"] = buf;
+      Serial.printf("[I2C] RTC aggiornato all'ora di Internet: %s\n", buf);
+    }
+    doc["stato"] = count ? "ok" : "nessun dispositivo risponde";
+  } else {
+    doc["stato"] = "bus bloccato: scansione saltata";
+    systemStatus.rtcConnected = false;
+  }
+  doc["trovati"] = count;
+  doc["rtc"] = systemStatus.rtcConnected ? "collegato" : "NON rilevato";
+  i2cScanResult = "";
+  serializeJson(doc, i2cScanResult);
+  Serial.printf("[I2C] Scansione completata: %d dispositivi, RTC %s\n", count, systemStatus.rtcConnected ? "OK" : "assente");
 }
 
 // === ARDUINO SETUP/LOOP ===
@@ -806,19 +878,22 @@ void setup() {
   tft.init();
   tft.setRotation(1); // orizzontale (T-Display)
 
-  // I2C
-  Wire.begin(I2C_SDA_PIN, I2C_SCL_PIN);
+  // I2C: controlla che i fili siano liberi prima di usarli (timeout 50 ms)
+  int i2cSda, i2cScl;
+  i2cLineLevels(i2cSda, i2cScl);
 
   // Stato iniziale
   memset(&systemStatus, 0, sizeof(systemStatus));
   systemStatus.bellsEnabled = AUTO_ENABLE_BELLS_ON_STARTUP;
 
-  // RTC
-  if (rtc.begin()) {
-    systemStatus.rtcConnected = true;
+  // RTC (solo se il bus è libero: con un filo a massa ogni accesso si bloccherebbe)
+  if (i2cSda && i2cScl) {
+    systemStatus.rtcConnected = rtc.begin();
   } else {
     systemStatus.rtcConnected = false;
   }
+  Serial.printf("[I2C] SDA=%s SCL=%s, RTC DS3231 %s\n", i2cSda ? "ok" : "BASSO", i2cScl ? "ok" : "BASSO",
+                systemStatus.rtcConnected ? "collegato" : "NON rilevato");
 
   // Bell controller
   bellController.begin();
@@ -1021,6 +1096,12 @@ void loop() {
     Serial.println("[Maintenance] Riavvio automatico in esecuzione");
     telegramBot.waitForOutbox(10000);
     ESP.restart();
+  }
+
+  // Scansione I2C chiesta dalla pagina diagnostica (eseguita qui, mai nel task web)
+  if (i2cScanRequested) {
+    i2cScanRequested = false;
+    scanI2CDevices();
   }
 
   // Comandi seriale
@@ -1402,6 +1483,17 @@ void processSerialCommands() {
     
     Serial.printf("\n>>> Comando ricevuto: '%s' <<<\n", command.c_str());
     
+    if (command == "manutenzione") {
+        // Prova manuale dell'auto manutenzione: stesso report e riavvio degli slot automatici
+        struct tm ti;
+        if (getLocalTm(ti) && !autoMaintenanceRestartPending) {
+            runAutoMaintenance(ti);
+        } else {
+            Serial.println("[Maintenance] Ora non disponibile o riavvio già pianificato");
+        }
+        return;
+    }
+
     if (command == "help" || command == "?") {
         Serial.println("\n=== COMANDI DISPONIBILI ===");
         Serial.println("help / ?                - Mostra questo menu");
@@ -2351,30 +2443,15 @@ void setupWebServer() {
   
 
   // API diagnostica: scansione I2C (mostra indirizzi trovati)
+  // La scansione NON gira qui (task web): con il bus guasto bloccava tutta la scheda.
+  // ?start=1 la chiede al loop(); senza parametri restituisce l'ultimo risultato.
   server.on("/api/i2c-scan", HTTP_GET, [](AsyncWebServerRequest *request){
-    Serial.println("📡 Richiesta ricevuta: /api/i2c-scan");
-    
-    // Ottimizzazione: StaticJsonDocument invece di Dynamic
-    StaticJsonDocument<512> doc;
-    JsonArray arr = doc.createNestedArray("devices");
-    uint8_t count = 0;
-    
-    for (uint8_t address = 1; address < 127; address++) {
-      Wire.beginTransmission(address);
-      uint8_t error = Wire.endTransmission();
-      if (error == 0) {
-        JsonObject d = arr.createNestedObject();
-        d["address"] = address;
-        d["hex"] = String("0x") + String(address, HEX);
-        count++;
-      }
+    if (request->hasParam("start")) {
+      i2cScanRequested = true;
+      request->send(200, "application/json", "{\"stato\":\"scansione avviata\"}");
+      return;
     }
-    
-    doc["count"] = count;
-    String resp; 
-    serializeJson(doc, resp);
-    request->send(200, "application/json", resp);
-    Serial.printf("✓ I2C scan: %d dispositivi\n", count);
+    request->send(200, "application/json", i2cScanResult);
   });
   
   // API per test melodia
